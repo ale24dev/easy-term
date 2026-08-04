@@ -3,12 +3,11 @@
 // the canonical menubar example uses; goes away if we later migrate to the
 // crate's objc2-based v2.1 branch.
 #![allow(deprecated)]
-// The old `objc` crate's macros (`msg_send!`, `class!`, `panel_delegate!`'s
-// expansion) contain a `cfg(feature = "cargo-clippy")` that modern rustc
-// flags as an unexpected cfg — and since macros are checked against the
-// cfgs of the crate they expand *into*, the warning lands here, not in the
-// dependency. Harmless; also goes away with the v2.1 migration.
-#![allow(unexpected_cfgs)]
+// The old `objc` crate's macros also expand a `cfg(feature = "cargo-clippy")`
+// here, which trips the `unexpected_cfgs` lint. That lint fires during macro
+// expansion — before module-scoped `allow`s apply — so it can't be silenced
+// from this file; the `[lints.rust]` table in Cargo.toml declares the value
+// as expected instead. Also goes away with the v2.1 migration.
 
 //! macOS-only: makes the popover reachable while another app is full
 //! screen, by converting it from a regular `NSWindow` into a

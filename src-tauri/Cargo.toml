@@ -43,3 +43,12 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints.rust]
+# The old `objc` crate's macros (used via tauri-nspanel: msg_send!, class!,
+# panel_delegate!) expand a `cfg(feature = "cargo-clippy")` into this crate,
+# tripping `unexpected_cfgs`. The lint fires during macro expansion, before
+# module-scoped allows apply, so the fix is declaring the value as expected
+# here — the approach the lint's own documentation recommends. Genuinely
+# unexpected cfgs still warn.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
