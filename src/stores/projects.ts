@@ -77,12 +77,17 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
   saveProject: async (input) => {
     try {
       const saved = await ipc.saveProject(input);
+      // A save can create a brand-new group (via findOrCreateGroup in
+      // ProjectForm right before this call) or change which group an
+      // existing project belongs to — refetch so the list reflects it
+      // instead of waiting for the next full app load.
+      const groups = await ipc.listGroups().catch(() => null);
       set((state) => {
         const exists = state.projects.some((p) => p.id === saved.id);
         const projects = exists
           ? state.projects.map((p) => (p.id === saved.id ? saved : p))
           : [...state.projects, saved];
-        return { projects };
+        return { projects, ...(groups ? { groups } : {}) };
       });
       return saved;
     } catch {

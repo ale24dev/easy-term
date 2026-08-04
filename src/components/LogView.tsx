@@ -8,11 +8,14 @@ import {
   FolderIcon,
   GlobeIcon,
   MonitorIcon,
+  PlayIcon,
+  RotateCwIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { getTerminal, hydrateFromBuffer } from "../lib/terminals";
 import { ipc } from "../lib/ipc";
-import { useProjectsStore } from "../stores/projects";
+import { useProjectsStore, getRuntime } from "../stores/projects";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { IconTooltip } from "./ui/tooltip";
@@ -31,6 +34,13 @@ export function LogView({ projectId }: LogViewProps) {
   const project = useProjectsStore((s) => s.projects.find((p) => p.id === projectId));
   const detectedUrl = useProjectsStore((s) => s.runtime[projectId]?.detectedUrl);
   const resetErrorCount = useProjectsStore((s) => s.resetErrorCount);
+  // Subscribed so the status-dependent controls below re-render on change.
+  useProjectsStore((s) => s.runtime[projectId]?.status);
+  const start = useProjectsStore((s) => s.start);
+  const stop = useProjectsStore((s) => s.stop);
+  const restart = useProjectsStore((s) => s.restart);
+  const { status } = getRuntime(projectId);
+  const isActive = status === "running" || status === "starting";
 
   const openableUrl = detectedUrl ?? (project?.port ? `http://localhost:${project.port}` : null);
 
@@ -191,6 +201,26 @@ export function LogView({ projectId }: LogViewProps) {
         <div className="flex shrink-0 items-center gap-0.5">
           {project && (
             <>
+              {isActive ? (
+                <>
+                  <IconTooltip label="Reiniciar">
+                    <Button variant="ghost" size="icon" onClick={() => restart(project.id)}>
+                      <RotateCwIcon />
+                    </Button>
+                  </IconTooltip>
+                  <IconTooltip label="Detener">
+                    <Button variant="ghost" size="icon" onClick={() => stop(project.id)}>
+                      <SquareIcon />
+                    </Button>
+                  </IconTooltip>
+                </>
+              ) : (
+                <IconTooltip label="Iniciar">
+                  <Button variant="ghost" size="icon" onClick={() => start(project.id)}>
+                    <PlayIcon />
+                  </Button>
+                </IconTooltip>
+              )}
               <IconTooltip label="Abrir en el editor">
                 <Button variant="ghost" size="icon" onClick={() => ipc.openInEditor(project.path)}>
                   <MonitorIcon />

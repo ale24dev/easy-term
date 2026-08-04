@@ -161,10 +161,15 @@ function App() {
                 <SlidersHorizontalIcon />
               </Button>
             </IconTooltip>
-            <Button size="sm" onClick={() => setView({ kind: "form", project: null })}>
-              <PlusIcon />
-              Proyecto
-            </Button>
+            <IconTooltip label="Nuevo proyecto">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setView({ kind: "form", project: null })}
+              >
+                <PlusIcon />
+              </Button>
+            </IconTooltip>
           </>
         ) : (
           <>
