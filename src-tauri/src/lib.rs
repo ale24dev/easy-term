@@ -12,6 +12,7 @@ mod tray;
 use process_manager::{ProcessManager, ProjectStatus};
 use project_store::ProjectStore;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, Runtime, WebviewWindow, WindowEvent,
@@ -19,6 +20,16 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_positioner::{Position, WindowExt};
+
+/// Set while a native dialog (e.g. the folder picker) is on screen.
+///
+/// On macOS, `tauri-plugin-dialog` presents its panel as a sheet attached to
+/// the popover window. Opening it moves focus away from that window, which
+/// would normally trigger the hide-on-blur handler below — hiding the
+/// window out from under its own sheet closes the sheet immediately. The
+/// frontend brackets its `open()` call with the `begin_native_dialog`/
+/// `end_native_dialog` commands (see `commands.rs`) to suppress that.
+pub(crate) struct SuppressAutoHide(pub AtomicBool);
 
 fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
     if window.is_visible().unwrap_or(false) {
@@ -75,6 +86,7 @@ pub fn run() {
         ))
         .manage(ProjectStore::load())
         .manage(ProcessManager::new())
+        .manage(SuppressAutoHide(AtomicBool::new(false)))
         .setup(|app| {
             error_logger::init(app.package_info().version.to_string(), std::env::consts::OS);
             env_resolver::init();
@@ -110,9 +122,13 @@ pub fn run() {
 
             if let Some(window) = app.get_webview_window("main") {
                 let hide_on_blur = window.clone();
+                let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::Focused(false) = event {
-                        let _ = hide_on_blur.hide();
+                        let suppress = app_handle.state::<SuppressAutoHide>();
+                        if !suppress.0.load(Ordering::SeqCst) {
+                            let _ = hide_on_blur.hide();
+                        }
                     }
                 });
             }
@@ -152,6 +168,8 @@ pub fn run() {
             commands::get_project_stats,
             commands::open_in_editor,
             commands::quit_app,
+            commands::begin_native_dialog,
+            commands::end_native_dialog,
             script_detector::detect_scripts,
             port_checker::check_port,
             port_checker::kill_port_owner,

@@ -177,3 +177,16 @@ pub fn open_in_editor(path: String) -> Result<(), AppError> {
 pub fn quit_app(app: AppHandle) {
     crate::quit(&app);
 }
+
+/// See `SuppressAutoHide` in `lib.rs`: the frontend calls this right before
+/// opening a native dialog so losing focus to it doesn't hide (and thereby
+/// close) the sheet attached to this window.
+#[tauri::command]
+pub fn begin_native_dialog(suppress: State<crate::SuppressAutoHide>) {
+    suppress.0.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[tauri::command]
+pub fn end_native_dialog(suppress: State<crate::SuppressAutoHide>) {
+    suppress.0.store(false, std::sync::atomic::Ordering::SeqCst);
+}

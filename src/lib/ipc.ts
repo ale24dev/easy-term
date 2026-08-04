@@ -167,6 +167,8 @@ export const ipc = {
   getProjectStats: (id: string) => call<ProcessStats | null>("get_project_stats", { id }),
   openInEditor: (path: string) => call<void>("open_in_editor", { path }),
   quitApp: () => call<void>("quit_app"),
+  beginNativeDialog: () => call<void>("begin_native_dialog"),
+  endNativeDialog: () => call<void>("end_native_dialog"),
 };
 
 export function onProcessStatus(cb: (event: StatusEvent) => void) {

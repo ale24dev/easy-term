@@ -59,9 +59,17 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
   }
 
   async function handlePickFolder() {
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected !== "string") return;
-    applyPath(selected);
+    // The popover window hides itself on blur (see lib.rs), and on macOS
+    // this native panel is a sheet attached to that window — losing focus
+    // to it would hide the window and close the sheet with it. Bracket the
+    // call so the backend skips that hide while the panel is open.
+    await ipc.beginNativeDialog();
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string") applyPath(selected);
+    } finally {
+      await ipc.endNativeDialog();
+    }
   }
 
   function updateEnvRow(index: number, field: keyof EnvRow, value: string) {

@@ -279,6 +279,21 @@ botón dentro de Settings y el toggle por-proyecto vive únicamente en la lista 
 Verificado en Linux (sin regresión en el código Rust compartido) y confirmado el flujo
 completo del nuevo comando `quit_app` end-to-end (snapshot de `wasRunning` + `app.exit(0)`).
 
+**Bug reportado en macOS real: el selector de carpeta se abría y se cerraba solo.**
+Mismo patrón que el bug anterior, distinta puerta de entrada: el handler de `Focused(false)`
+en `lib.rs` oculta la ventana del popover al perder foco (para que se comporte como un
+popover normal). El picker de carpeta (`@tauri-apps/plugin-dialog`, botón "Elegir…" en
+`ProjectForm`) se presenta en macOS como una *sheet* adjunta a esa ventana — abrirlo le quita
+el foco a la ventana, disparando el hide, y ocultar la ventana se lleva puesta a su propia
+sheet, que se cierra de inmediato. Corregido con un flag (`SuppressAutoHide`, `AtomicBool` en
+el estado de la app) que el frontend activa justo antes de invocar `open()` y desactiva al
+resolver la promesa (comandos `begin_native_dialog`/`end_native_dialog`); el handler de blur
+respeta el flag y no oculta la ventana mientras el diálogo está abierto. Verificado en Linux
+que el flujo IPC no rompe nada (el picker ahí es GTK vía portal, no reproduce el bug de sheet
+en sí, pero confirma que no hay regresión): seleccionar carpeta completa `path`/`name`/
+detección de scripts con normalidad. Pendiente confirmar en macOS real que el picker ya no se
+cierra solo.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.
