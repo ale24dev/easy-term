@@ -144,11 +144,11 @@ la config persiste a JSON con escritura atómica (write-to-temp + rename).
 
 ## 5. Fases de implementación
 
-### Fase 0 — Scaffold (½ día)
-- [ ] `pnpm create tauri-app` (React + TS + Vite), Tauri v2.
-- [ ] Configurar tray icon + `tauri-plugin-positioner`, ventana popover anclada, hide on blur.
-- [ ] `ActivationPolicy::Accessory` (solo menu bar, sin Dock).
-- [ ] CI básico: `cargo check` + `tsc --noEmit` + `cargo fmt --check` en GitHub Actions.
+### Fase 0 — Scaffold (½ día) ✅ completada
+- [x] `pnpm create tauri-app` (React + TS + Vite), Tauri v2.
+- [x] Configurar tray icon + `tauri-plugin-positioner`, ventana popover anclada, hide on blur.
+- [x] `ActivationPolicy::Accessory` (solo menu bar, sin Dock).
+- [x] CI básico: `cargo check` + `tsc --noEmit` + `cargo fmt --check` en GitHub Actions.
 
 **Criterio de salida:** icono en el menu bar que abre/cierra un popover vacío.
 
