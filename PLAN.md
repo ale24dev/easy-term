@@ -461,6 +461,29 @@ Se agregó `ns_window.setLevel(NSStatusWindowLevel)` a `allow_join_fullscreen_sp
 el nivel actual es menor, para no bajarlo si algo lo tenía más alto). Sigue sin poder
 compilarse en este sandbox — pendiente de que el usuario confirme con el build nuevo.
 
+**Tercer seguimiento: tampoco alcanzó — "no funciona para nada".** El fix del `level` no
+cambió nada observable. Se confirmó de forma concreta (revisando `cargo tree` contra el
+target `x86_64-apple-darwin`) que este sandbox no tiene forma de compilar ni tipar código
+`objc2`/AppKit real: `objc2-exception-helper` (dependencia transitiva de `tao` y `rfd`, ya
+presente antes de cualquier cambio de esta sesión — no es algo que este fix haya introducido)
+necesita compilar un `.m` con flags de Clang para macOS (`-arch`/`-mmacosx-version-min`) que
+el `cc` de Linux no soporta, y no hay SDK/toolchain de cross-compilación (`osxcross`)
+instalado. Sin poder ejecutar ni un `cargo check` real contra AppKit, seguir iterando a
+ciegas sobre qué combinación exacta de flags/nivel funciona dejó de ser productivo.
+
+Cambio de estrategia: en vez de otro fix-adivinanza, se agregó **instrumentación** —
+`macos_window::log_window_diagnostics`, llamada justo después de cada `show()`, que vuelca al
+mismo log de diagnóstico que ya usa Settings → Diagnóstico (`isVisible`, `isOnActiveSpace`,
+`isKeyWindow`, `occlusionState`, `level`, `collectionBehavior`, `frame`) — son exactamente las
+propiedades de AppKit que determinan si una ventana efectivamente se pinta sobre una Space en
+pantalla completa. Como el popover no abre durante el repro (ese es justamente el bug), la UI
+de Settings no es alcanzable en ese momento — el archivo hay que leerlo directo:
+`~/Library/Logs/easy-term/errors-YYYY-MM-DD.jsonl` (el de hoy). Con esos valores reales se
+puede diagnosticar con precisión en vez de seguir adivinando — sea que el problema esté en
+`collectionBehavior`/`level` (no tomaron efecto), en el posicionamiento de
+`tauri-plugin-positioner` (la ventana se mueve fuera de pantalla), o en algo completamente
+distinto que ninguna de las dos hipótesis anteriores contempló.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.

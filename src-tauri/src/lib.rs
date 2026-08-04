@@ -47,6 +47,14 @@ fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
         let _ = window.move_window_constrained(Position::TrayCenter);
         let _ = window.show();
         let _ = window.set_focus();
+
+        // Diagnostic snapshot, not a fix: the fullscreen-space fix above
+        // still reportedly has no visible effect at all. Writes to the same
+        // log Settings → Diagnóstico already shows, so the next repro
+        // produces real AppKit state instead of a yes/no. Safe to leave in
+        // — cheap, and only fires on every popover open.
+        #[cfg(target_os = "macos")]
+        macos_window::log_window_diagnostics(window);
     }
 }
 
