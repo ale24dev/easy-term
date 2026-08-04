@@ -1,10 +1,12 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalEntry {
   terminal: Terminal;
   fitAddon: FitAddon;
+  searchAddon: SearchAddon;
   /** Owned by this registry, not by React — LogView re-parents it via
    * appendChild on mount instead of destroying/recreating it, so the
    * instance (and its scrollback) survives switching away from a project. */
@@ -24,12 +26,14 @@ function createEntry(): TerminalEntry {
     theme: { background: "#00000000" },
   });
   const fitAddon = new FitAddon();
+  const searchAddon = new SearchAddon();
   terminal.loadAddon(fitAddon);
+  terminal.loadAddon(searchAddon);
 
   const container = document.createElement("div");
   container.className = "terminal-host";
 
-  return { terminal, fitAddon, container, opened: false };
+  return { terminal, fitAddon, searchAddon, container, opened: false };
 }
 
 export function getTerminal(id: string): TerminalEntry {

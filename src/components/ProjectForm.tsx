@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectsStore } from "../stores/projects";
-import type { Project } from "../lib/ipc";
+import { ipc, type DetectedScript, type Project } from "../lib/ipc";
+
+const DEFAULT_COMMAND = "pnpm run dev";
 
 interface EnvRow {
   key: string;
@@ -19,23 +21,42 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
 
   const [name, setName] = useState(initial?.name ?? "");
   const [path, setPath] = useState(initial?.path ?? "");
-  const [command, setCommand] = useState(initial?.command ?? "pnpm run dev");
+  const [command, setCommand] = useState(initial?.command ?? DEFAULT_COMMAND);
   const [port, setPort] = useState(initial?.port?.toString() ?? "");
   const [envRows, setEnvRows] = useState<EnvRow[]>(
     initial ? Object.entries(initial.env).map(([key, value]) => ({ key, value })) : [],
   );
+  const [scripts, setScripts] = useState<DetectedScript[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function applyPath(selected: string) {
+    setPath(selected);
+    setScripts([]);
+
+    const base = selected.split("/").filter(Boolean).pop();
+    if (!name.trim() && base) setName(base);
+
+    try {
+      const detected = await ipc.detectScripts(selected);
+      setScripts(detected.scripts);
+      if (detected.name && !name.trim()) setName(detected.name);
+      // Only auto-pick a script for a brand-new project whose command is
+      // still the untouched placeholder — never clobber an edit in progress.
+      if (!initial && command === DEFAULT_COMMAND && detected.scripts.length > 0) {
+        const preferred =
+          detected.scripts.find((s) => s.name === "dev") ?? detected.scripts[0];
+        setCommand(preferred.command);
+      }
+    } catch {
+      // No package.json (or unreadable) — the user just types a command manually.
+    }
+  }
 
   async function handlePickFolder() {
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected !== "string") return;
-
-    setPath(selected);
-    if (!name.trim()) {
-      const base = selected.split("/").filter(Boolean).pop();
-      if (base) setName(base);
-    }
+    applyPath(selected);
   }
 
   function updateEnvRow(index: number, field: keyof EnvRow, value: string) {
@@ -120,6 +141,28 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
           placeholder="pnpm run dev"
         />
       </label>
+
+      {scripts.length > 0 && (
+        <label className="field">
+          <span>Scripts detectados</span>
+          <select
+            value={scripts.find((s) => s.command === command)?.name ?? ""}
+            onChange={(e) => {
+              const script = scripts.find((s) => s.name === e.target.value);
+              if (script) setCommand(script.command);
+            }}
+          >
+            <option value="" disabled>
+              Elegir un script…
+            </option>
+            {scripts.map((script) => (
+              <option key={script.name} value={script.name}>
+                {script.name} — {script.command}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <label className="field">
         <span>Puerto (opcional)</span>

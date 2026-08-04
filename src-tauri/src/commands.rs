@@ -2,9 +2,10 @@
 //! `process_manager` — no business logic lives here.
 
 use crate::error_logger::AppError;
-use crate::process_manager;
+use crate::process_manager::{self, ProcessManager};
 use crate::project_store::{Project, ProjectStore};
-use tauri::{AppHandle, State};
+use crate::tray;
+use tauri::{AppHandle, Manager, State};
 
 fn find_project(store: &ProjectStore, id: &str) -> Result<Project, AppError> {
     store.get(id).ok_or_else(|| {
@@ -22,8 +23,14 @@ pub fn list_projects(store: State<ProjectStore>) -> Vec<Project> {
 }
 
 #[tauri::command]
-pub fn save_project(store: State<ProjectStore>, project: Project) -> Result<Project, AppError> {
-    store.save(project)
+pub fn save_project(
+    app: AppHandle,
+    store: State<ProjectStore>,
+    project: Project,
+) -> Result<Project, AppError> {
+    let saved = store.save(project)?;
+    tray::refresh(&app);
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -35,7 +42,10 @@ pub fn delete_project(
     // Best-effort stop first — deleting a running project shouldn't leave an
     // orphaned process nobody can reach from the UI anymore.
     let _ = process_manager::stop(&app, &id);
-    store.delete(&id)
+    store.delete(&id)?;
+    app.state::<ProcessManager>().forget(&id);
+    tray::refresh(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -66,4 +76,14 @@ pub fn restart_project(
 #[tauri::command]
 pub fn get_process_output(app: AppHandle, id: String) -> String {
     process_manager::get_output(&app, &id)
+}
+
+#[tauri::command]
+pub fn get_error_count(manager: State<ProcessManager>, id: String) -> u32 {
+    manager.error_count(&id)
+}
+
+#[tauri::command]
+pub fn reset_error_count(manager: State<ProcessManager>, id: String) {
+    manager.reset_error_count(&id);
 }

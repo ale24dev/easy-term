@@ -182,28 +182,41 @@ limpiamente sin dejar zombis (`ps aux` confirmado). Cero eventos en el log de di
 durante la prueba. Pendiente de validar en macOS real: posicionamiento del popover respecto
 al tray, `ActivationPolicy::Accessory`, y el picker de carpetas nativo (NSOpenPanel).
 
-### Fase 2 — Los features que justifican la app (3–4 días)
-- [ ] **2.1 Detección automática** (`script_detector`): al escoger carpeta, parsear
+### Fase 2 — Los features que justifican la app (3–4 días) ✅ completada
+- [x] **2.1 Detección automática** (`script_detector`): al escoger carpeta, parsear
       `package.json` → dropdown de scripts; package manager por lockfile
       (`pnpm-lock.yaml` → pnpm, `bun.lockb`/`bun.lock` → bun, `yarn.lock` → yarn,
-      `package-lock.json` → npm). Pre-rellenar nombre con el de `package.json`.
-- [ ] **2.2 Gestión de puertos** (`port_checker`): check pre-start; si ocupado, dialog con
-      el proceso dueño (nombre + PID) y opción "matar y levantar". Resuelve `EADDRINUSE`
-      en un click.
-- [ ] **2.3 Tray con estado**: icono con dot verde (todo corre) / rojo (algo crasheó) +
-      título con contador de procesos activos. Menú contextual del tray: lista de proyectos
-      con start/stop directo + Quit.
-- [ ] **2.4 Abrir en navegador**: botón con la URL; regex sobre logs para detectar la URL
-      real que imprime el dev server (`process:url-detected`) — cubre el caso de Vite
-      saltando de puerto.
-- [ ] **2.5 Búsqueda en logs**: `@xterm/addon-search` con barra de búsqueda (⌘F dentro del popover).
-- [ ] **2.6 Notificaciones nativas de crash**: `tauri-plugin-notification`; click en la
-      notificación → abre el popover en los logs de ese proyecto.
-- [ ] **2.7 Highlight de errores**: contador de líneas `error|warn` (regex sobre el stream)
-      → badge numérico por proyecto, se resetea al ver los logs.
-- [ ] **2.8 Diagnóstico — dedupe y visor**: anti-tormenta de errores repetidos, panel
-      Settings → Diagnóstico con visor de eventos, "Abrir carpeta de logs" y "Copiar
-      último error" (ver 7.6).
+      `package-lock.json` → npm). Pre-rellena nombre con el de `package.json`.
+- [x] **2.2 Gestión de puertos** (`port_checker`): check pre-start vía `lsof`; si ocupado,
+      dialog con el proceso dueño (nombre + PID) y opción "Liberar y continuar"
+      (SIGTERM→SIGKILL). Resuelve `EADDRINUSE` en un click.
+- [x] **2.3 Tray con estado**: título del tray con dot verde (🟢 N corriendo) / rojo
+      (🔴 algo crasheó). Menú contextual con un item por proyecto (start/stop directo,
+      glyph de estado) + Quit, se reconstruye reactivamente en cada cambio de estado o
+      de lista de proyectos.
+- [x] **2.4 Abrir en navegador**: botón en LogView con la URL detectada (o
+      `http://localhost:{puerto}` como fallback) vía `process:url-detected`.
+- [x] **2.5 Búsqueda en logs**: `@xterm/addon-search` con barra de búsqueda (Cmd/Ctrl+F),
+      next/prev, Esc para cerrar.
+- [x] **2.6 Notificaciones nativas de crash**: `tauri-plugin-notification`; el id del
+      proyecto viaja en el campo `extra` de la notificación, un listener `onAction` en el
+      frontend salta directo a los logs de ese proyecto al hacer click.
+- [x] **2.7 Highlight de errores**: contador de líneas `error|warn` (regex sobre el
+      stream) → badge numérico en `ProjectList`, se resetea al abrir los logs.
+- [x] **2.8 Diagnóstico — dedupe y visor**: dedupe de errores repetidos ya en el
+      `error_logger` base (Fase 1); panel Settings → Diagnóstico con visor de eventos,
+      "Abrir carpeta de logs" y "Copiar último error".
+
+**Validado end-to-end en Linux** (Xvfb + xdotool + dunst, sin acceso a macOS en esta
+sesión): detección de scripts desde un `package.json` real (nombre y comando
+pre-rellenados correctamente), diálogo de conflicto de puerto identificando el proceso
+dueño real y liberándolo antes de arrancar, badge de errores incrementando en vivo con
+reset al abrir logs, botón "Abrir en navegador" con la URL detectada, búsqueda en logs
+resaltando coincidencias y haciendo scroll automático, panel de diagnóstico mostrando
+"sin errores" tras toda la sesión de pruebas (cero errores internos logueados). Pendiente
+de validar en macOS real: aspecto del ícono/título del tray nativo y el comportamiento
+de click-through de las notificaciones (macOS puede diferir del mecanismo Linux/dbus
+usado aquí para probar `onAction`).
 
 **Criterio de salida:** configurar un proyecto nuevo son 2 clicks; un puerto ocupado se
 resuelve desde la app; me entero de un crash sin mirar la app.

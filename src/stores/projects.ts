@@ -5,12 +5,14 @@ interface ProjectRuntime {
   status: ProjectStatus;
   pid: number | null;
   detectedUrl: string | null;
+  errorCount: number;
 }
 
 export const DEFAULT_RUNTIME: ProjectRuntime = {
   status: "stopped",
   pid: null,
   detectedUrl: null,
+  errorCount: 0,
 };
 
 interface ProjectsState {
@@ -27,6 +29,8 @@ interface ProjectsState {
 
   setStatus: (id: string, status: ProjectStatus, pid: number | null) => void;
   setDetectedUrl: (id: string, url: string) => void;
+  setErrorCount: (id: string, count: number) => void;
+  resetErrorCount: (id: string) => Promise<void>;
 }
 
 export const useProjectsStore = create<ProjectsState>((set) => ({
@@ -114,6 +118,28 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
         [id]: { ...(state.runtime[id] ?? DEFAULT_RUNTIME), detectedUrl: url },
       },
     })),
+
+  setErrorCount: (id, count) =>
+    set((state) => ({
+      runtime: {
+        ...state.runtime,
+        [id]: { ...(state.runtime[id] ?? DEFAULT_RUNTIME), errorCount: count },
+      },
+    })),
+
+  resetErrorCount: async (id) => {
+    try {
+      await ipc.resetErrorCount(id);
+    } catch {
+      // best-effort — the badge will just be off by whatever came in meanwhile
+    }
+    set((state) => ({
+      runtime: {
+        ...state.runtime,
+        [id]: { ...(state.runtime[id] ?? DEFAULT_RUNTIME), errorCount: 0 },
+      },
+    }));
+  },
 }));
 
 export function getRuntime(id: string): ProjectRuntime {

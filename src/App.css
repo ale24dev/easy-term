@@ -46,7 +46,8 @@ button:disabled {
   cursor: default;
 }
 
-input {
+input,
+select {
   font-family: inherit;
   font-size: 12px;
   color: inherit;
@@ -58,7 +59,8 @@ input {
   width: 100%;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: #3b82f6;
 }
 
@@ -205,6 +207,17 @@ input:focus {
   background: #9ca3af;
 }
 
+.error-badge {
+  background: #ef4444;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
 /* Project form */
 
 .project-form {
@@ -285,11 +298,12 @@ input:focus {
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
 }
 
 .log-view-host {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
   padding: 4px 8px;
 }
 
@@ -298,9 +312,39 @@ input:focus {
   width: 100%;
 }
 
+.log-search-bar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+.log-search-bar input {
+  flex: 1;
+}
+
+.log-search-bar button {
+  padding: 4px 8px;
+}
+
+.log-view-toolbar {
+  flex-shrink: 0;
+  padding: 4px 8px 8px;
+}
+
+.open-url-button {
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .follow-button {
   position: absolute;
-  bottom: 12px;
+  bottom: 44px;
   right: 20px;
   font-size: 11px;
   padding: 4px 10px;
@@ -313,6 +357,129 @@ input:focus {
 
 .follow-button:hover {
   background: rgba(10, 10, 10, 0.9);
+}
+
+/* Dialogs */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.dialog {
+  background: #f6f6f6;
+  border-radius: 10px;
+  padding: 16px;
+  width: 280px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.dialog-title {
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.dialog-body {
+  font-size: 12px;
+  margin: 0 0 14px;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-actions .primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+}
+
+/* Settings / diagnostics */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  gap: 10px;
+}
+
+.settings-toolbar {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.diagnostics-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diagnostic-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.03);
+  font-size: 11px;
+}
+
+.diagnostic-level {
+  text-transform: uppercase;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 32px;
+}
+
+.diagnostic-warn .diagnostic-level {
+  color: #d97706;
+}
+
+.diagnostic-error .diagnostic-level,
+.diagnostic-fatal .diagnostic-level {
+  color: #ef4444;
+}
+
+.diagnostic-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diagnostic-code {
+  font-family: "SF Mono", Menlo, monospace;
+  font-weight: 600;
+}
+
+.diagnostic-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.diagnostic-time {
+  flex-shrink: 0;
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -330,9 +497,34 @@ input:focus {
     background: rgba(255, 255, 255, 0.1);
   }
 
-  input {
+  input,
+  select {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.14);
+  }
+
+  .log-search-bar {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .dialog {
+    background: #2a2a2a;
+  }
+
+  .dialog-body {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .diagnostic-row {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .diagnostic-message {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .diagnostic-time {
+    color: rgba(255, 255, 255, 0.4);
   }
 
   .popover-header {

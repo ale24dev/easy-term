@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react";
+import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
 import "./App.css";
 import { ProjectList } from "./components/ProjectList";
 import { ProjectForm } from "./components/ProjectForm";
 import { LogView } from "./components/LogView";
+import { Settings } from "./components/Settings";
 import { installGlobalErrorHandlers } from "./lib/errorReporter";
-import { onProcessStatus, onProcessOutput, onProcessExit, onUrlDetected } from "./lib/ipc";
+import {
+  onProcessStatus,
+  onProcessOutput,
+  onProcessExit,
+  onUrlDetected,
+  onErrorCount,
+} from "./lib/ipc";
 import { writeChunk, writeExitMarker } from "./lib/terminals";
 import { useProjectsStore } from "./stores/projects";
 import type { Project } from "./lib/ipc";
@@ -12,7 +20,8 @@ import type { Project } from "./lib/ipc";
 type View =
   | { kind: "list" }
   | { kind: "form"; project: Project | null }
-  | { kind: "logs"; projectId: string };
+  | { kind: "logs"; projectId: string }
+  | { kind: "settings" };
 
 function App() {
   const [view, setView] = useState<View>({ kind: "list" });
@@ -20,6 +29,7 @@ function App() {
   const loadProjects = useProjectsStore((s) => s.loadProjects);
   const setStatus = useProjectsStore((s) => s.setStatus);
   const setDetectedUrl = useProjectsStore((s) => s.setDetectedUrl);
+  const setErrorCount = useProjectsStore((s) => s.setErrorCount);
 
   useEffect(() => {
     installGlobalErrorHandlers();
@@ -33,12 +43,25 @@ function App() {
         writeExitMarker(e.id, e.code, crashed);
       }),
       onUrlDetected((e) => setDetectedUrl(e.id, e.url)),
+      onErrorCount((e) => setErrorCount(e.id, e.count)),
     ];
+
+    // Clicking a crash notification jumps straight to that project's logs
+    // and brings the (normally hidden) popover to the front.
+    onNotificationAction((notification) => {
+      const projectId = notification.extra?.projectId;
+      if (typeof projectId === "string") {
+        setView({ kind: "logs", projectId });
+      }
+    }).catch(() => {
+      // Notification action listening isn't available on every platform —
+      // crash notifications still show, they just won't deep-link.
+    });
 
     return () => {
       unlistenPromises.forEach((promise) => promise.then((unlisten) => unlisten()));
     };
-  }, [loadProjects, setStatus, setDetectedUrl]);
+  }, [loadProjects, setStatus, setDetectedUrl, setErrorCount]);
 
   const activeProjectName =
     view.kind === "logs" ? (projects.find((p) => p.id === view.projectId)?.name ?? "") : "";
@@ -49,6 +72,9 @@ function App() {
         {view.kind === "list" ? (
           <>
             <span className="popover-title">easy-term</span>
+            <button title="Diagnóstico" onClick={() => setView({ kind: "settings" })}>
+              ⚙
+            </button>
             <button
               className="header-action"
               onClick={() => setView({ kind: "form", project: null })}
@@ -66,7 +92,9 @@ function App() {
                 ? view.project
                   ? "Editar proyecto"
                   : "Nuevo proyecto"
-                : activeProjectName}
+                : view.kind === "settings"
+                  ? "Diagnóstico"
+                  : activeProjectName}
             </span>
           </>
         )}
@@ -89,6 +117,8 @@ function App() {
         )}
 
         {view.kind === "logs" && <LogView projectId={view.projectId} />}
+
+        {view.kind === "settings" && <Settings />}
       </div>
     </main>
   );

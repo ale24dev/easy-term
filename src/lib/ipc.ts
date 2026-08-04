@@ -47,6 +47,47 @@ export interface UrlDetectedEvent {
   url: string;
 }
 
+export interface ErrorCountEvent {
+  id: string;
+  count: number;
+}
+
+export interface DetectedScript {
+  name: string;
+  command: string;
+}
+
+export interface DetectedConfig {
+  name: string | null;
+  packageManager: string;
+  scripts: DetectedScript[];
+}
+
+export interface PortOwner {
+  pid: number;
+  name: string;
+}
+
+export interface PortCheckResult {
+  free: boolean;
+  owner: PortOwner | null;
+}
+
+export interface DiagnosticEvent {
+  ts: string;
+  level: "warn" | "error" | "fatal";
+  source: "backend" | "frontend";
+  module: string;
+  code: string;
+  message: string;
+  context?: unknown;
+  stack?: string;
+  session: string;
+  appVersion: string;
+  osVersion: string;
+  repeats?: number;
+}
+
 interface AppErrorPayload {
   code: string;
   message: string;
@@ -89,6 +130,14 @@ export const ipc = {
   stopProject: (id: string) => call<void>("stop_project", { id }),
   restartProject: (id: string) => call<void>("restart_project", { id }),
   getProcessOutput: (id: string) => call<string>("get_process_output", { id }),
+  getErrorCount: (id: string) => call<number>("get_error_count", { id }),
+  resetErrorCount: (id: string) => call<void>("reset_error_count", { id }),
+  detectScripts: (path: string) => call<DetectedConfig>("detect_scripts", { path }),
+  checkPort: (port: number) => call<PortCheckResult>("check_port", { port }),
+  killPortOwner: (port: number) => call<void>("kill_port_owner", { port }),
+  readErrorLog: (day?: string, limit?: number) =>
+    call<DiagnosticEvent[]>("read_error_log", { day, limit }),
+  openLogsFolder: () => call<void>("open_logs_folder"),
 };
 
 export function onProcessStatus(cb: (event: StatusEvent) => void) {
@@ -105,4 +154,8 @@ export function onProcessExit(cb: (event: ExitEvent) => void) {
 
 export function onUrlDetected(cb: (event: UrlDetectedEvent) => void) {
   return listen<UrlDetectedEvent>("process:url-detected", (event) => cb(event.payload));
+}
+
+export function onErrorCount(cb: (event: ErrorCountEvent) => void) {
+  return listen<ErrorCountEvent>("process:error-count", (event) => cb(event.payload));
 }

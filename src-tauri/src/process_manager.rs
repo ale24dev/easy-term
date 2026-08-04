@@ -28,6 +28,9 @@ static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"https?://(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s\x1b]*").unwrap()
 });
 
+static ERROR_LINE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(error|warn(?:ing)?)\b").unwrap());
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectStatus {
@@ -58,11 +61,51 @@ struct ProcessHandle {
 #[derive(Default)]
 pub struct ProcessManager {
     processes: Mutex<HashMap<String, ProcessHandle>>,
+    /// Last known status per project id, kept even after the process handle
+    /// itself is removed (e.g. "crashed" needs to survive past the exit) —
+    /// this is what the tray and project list badges read from.
+    statuses: Mutex<HashMap<String, ProjectStatus>>,
+    /// Count of error/warn-looking lines seen since the log was last opened.
+    error_counts: Mutex<HashMap<String, u32>>,
 }
 
 impl ProcessManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn snapshot_statuses(&self) -> HashMap<String, ProjectStatus> {
+        self.statuses.lock().unwrap().clone()
+    }
+
+    pub fn status_of(&self, id: &str) -> ProjectStatus {
+        self.statuses
+            .lock()
+            .unwrap()
+            .get(id)
+            .copied()
+            .unwrap_or(ProjectStatus::Stopped)
+    }
+
+    pub fn error_count(&self, id: &str) -> u32 {
+        self.error_counts
+            .lock()
+            .unwrap()
+            .get(id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn reset_error_count(&self, id: &str) {
+        self.error_counts.lock().unwrap().remove(id);
+    }
+
+    /// Drops all bookkeeping for a project that's been deleted, so a reused
+    /// id (unlikely with uuids, but cheap to guard) or long-lived sessions
+    /// with many create/delete cycles don't accumulate stale map entries.
+    pub fn forget(&self, id: &str) {
+        self.statuses.lock().unwrap().remove(id);
+        self.error_counts.lock().unwrap().remove(id);
     }
 }
 
@@ -91,7 +134,20 @@ struct UrlPayload {
     url: String,
 }
 
+#[derive(Serialize, Clone)]
+struct ErrorCountPayload {
+    id: String,
+    count: u32,
+}
+
 fn emit_status(app: &AppHandle, id: &str, status: ProjectStatus, pid: Option<u32>) {
+    let manager = app.state::<ProcessManager>();
+    manager
+        .statuses
+        .lock()
+        .unwrap()
+        .insert(id.to_string(), status);
+
     let _ = app.emit(
         "process:status",
         StatusPayload {
@@ -100,6 +156,8 @@ fn emit_status(app: &AppHandle, id: &str, status: ProjectStatus, pid: Option<u32
             pid,
         },
     );
+
+    crate::tray::refresh(app);
 }
 
 pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
@@ -324,6 +382,16 @@ fn spawn_reader_thread(
                             }
                         }
 
+                        if let Some(count) = count_error_lines(&app, &id, &chunk) {
+                            let _ = app.emit(
+                                "process:error-count",
+                                ErrorCountPayload {
+                                    id: id.clone(),
+                                    count,
+                                },
+                            );
+                        }
+
                         if tx.send(chunk).is_err() {
                             break;
                         }
@@ -356,6 +424,26 @@ fn detect_url(chunk: &[u8]) -> Option<String> {
     URL_RE
         .find(&text)
         .map(|m| m.as_str().trim_end_matches(['/', ')', '"']).to_string())
+}
+
+/// Counts lines in `chunk` that look like an error/warning, adds them to the
+/// project's running total, and returns the new total — or `None` when the
+/// chunk contributed nothing, so callers can skip emitting a no-op event.
+fn count_error_lines(app: &AppHandle, id: &str, chunk: &[u8]) -> Option<u32> {
+    let text = String::from_utf8_lossy(chunk);
+    let matches = text
+        .lines()
+        .filter(|line| ERROR_LINE_RE.is_match(line))
+        .count() as u32;
+    if matches == 0 {
+        return None;
+    }
+
+    let manager = app.state::<ProcessManager>();
+    let mut counts = manager.error_counts.lock().unwrap();
+    let total = counts.entry(id.to_string()).or_insert(0);
+    *total += matches;
+    Some(*total)
 }
 
 fn batch_and_emit(app: AppHandle, id: String, rx: std::sync::mpsc::Receiver<Vec<u8>>) {
@@ -445,6 +533,7 @@ fn spawn_waiter_thread(
                     Some(serde_json::json!({ "projectId": id, "code": code })),
                     None,
                 );
+                crate::notifications::notify_crash(&app, &id, &name, code);
             }
 
             emit_status(&app, &id, final_status, None);
