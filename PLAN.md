@@ -443,6 +443,24 @@ Electron internamente para la misma feature, así que no eran el problema.
 que ni siquiera este cambio de *dónde* se llama la función se compile en este sandbox Linux
 — sigue pendiente de confirmación real.
 
+**Segundo seguimiento: tampoco alcanzó, ni siquiera en el build de producción.** El usuario
+confirmó que con el fix anterior (reaplicar en cada `show()`) el problema persistía tanto en
+`pnpm tauri dev` como en un build real — descartando de una vez la teoría de timing
+dev-vs-release. Antes de intentar un tercer fix a ciegas, se buscaron implementaciones reales
+y funcionando: código fuente de apps open-source de macOS que sí logran mostrarse sobre una
+app en pantalla completa (NotchDrop, Lunar, y varias más, vía búsqueda de código en GitHub
+por `fullScreenAuxiliary` + `canJoinAllSpaces` en Swift). El patrón es consistente en
+absolutamente todas: además de esos dos flags de `collectionBehavior`, **todas** suben el
+`level` de la ventana a `NSStatusWindowLevel` (25) o más — el mismo nivel en el que renderiza
+la propia barra de menú del sistema. `alwaysOnTop: true` en `tauri.conf.json` solo le da a la
+ventana `NSFloatingWindowLevel` (3, vía tao), muy por debajo de dónde compone una Space en
+pantalla completa. Sin ese nivel, ningún `collectionBehavior` alcanza — coincide con lo que
+reportó el usuario (ningún cambio visible en absoluto, ni siquiera un parpadeo).
+
+Se agregó `ns_window.setLevel(NSStatusWindowLevel)` a `allow_join_fullscreen_space` (solo si
+el nivel actual es menor, para no bajarlo si algo lo tenía más alto). Sigue sin poder
+compilarse en este sandbox — pendiente de que el usuario confirme con el build nuevo.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.
