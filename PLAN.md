@@ -568,6 +568,19 @@ Misma limitación de compilación de siempre para el código AppKit, pero con un
 importante: esta vez la configuración no es una hipótesis propia sino la copia fiel de dos
 ejemplos publicados y funcionando del autor del crate, leídos desde el código fuente real.
 
+**✅ CONFIRMADO en macOS real por el usuario**: con el fix del NSPanel, el popover ya abre
+correctamente con otra app en pantalla completa. El código compiló a la primera en la Mac
+(solo warnings de deprecación del re-export de `cocoa`, silenciados después con el mismo
+`#![allow(deprecated)]` del ejemplo canónico — commit `d3ff5af`, cosmético). Los tres
+intentos anteriores (collectionBehavior, reaplicar en show, window level) quedan como
+registro de qué *no* alcanza por sí solo: nada de eso funciona mientras el show path pase por
+`makeKeyAndOrderFront`/`activateIgnoringOtherApps` sobre una `NSWindow` común.
+
+Pendiente de re-verificar manualmente en macOS tras el cambio de mecanismo de auto-cierre
+(el hide-on-blur pasó del handler de tao al delegate del panel): cerrar clickeando afuera,
+y que el picker de carpeta siga sin cerrarse solo (los flujos `01`/`02` de `e2e/macos`
+cubren esto en CI, con la salvedad de siempre de que esa suite aún no corrió en verde).
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.
