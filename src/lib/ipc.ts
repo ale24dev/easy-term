@@ -166,6 +166,7 @@ export const ipc = {
   stopGroup: (groupId: string) => call<void>("stop_group", { groupId }),
   getProjectStats: (id: string) => call<ProcessStats | null>("get_project_stats", { id }),
   openInEditor: (path: string) => call<void>("open_in_editor", { path }),
+  quitApp: () => call<void>("quit_app"),
 };
 
 export function onProcessStatus(cb: (event: StatusEvent) => void) {

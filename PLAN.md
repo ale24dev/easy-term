@@ -266,6 +266,19 @@ CPU/RAM verificado contra el `ps` real del proceso corriendo. Pendiente de confi
 macOS real: el atajo global `Alt+Space` (no testeable de forma confiable vía X11 synthetic
 events) y el comportamiento exacto de `tauri-plugin-autostart` (macOS usa LaunchAgents).
 
+**Bug reportado en macOS real (post-Fase 3): click en el tray solo mostraba "Quit".**
+El tray (2.3) adjuntaba un menú nativo vía `tray.set_menu()` para el status agregado y el
+toggle rápido de proyectos. En macOS, `NSStatusItem.setMenu()` hace que AppKit muestre ese
+menú en **todo** click —izquierdo incluido— sin importar `show_menu_on_left_click`; es un bug
+conocido y no resuelto de Tauri (tauri-apps/tauri#4002), no reproducible en Linux porque el
+backend de tray ahí es GTK, arquitectónicamente distinto. Con el menú adjunto, el click
+izquierdo dejó de abrir el popover del todo. Corregido eliminando por completo el menú nativo
+del tray: el título/tooltip del tray (`tray.rs`) sigue reflejando el estado agregado y
+por-proyecto (glyphs `🟢/🟡/🔴/⚪` en el tooltip al hacer hover), pero "Salir" se movió a un
+botón dentro de Settings y el toggle por-proyecto vive únicamente en la lista del popover.
+Verificado en Linux (sin regresión en el código Rust compartido) y confirmado el flujo
+completo del nuevo comando `quit_app` end-to-end (snapshot de `wasRunning` + `app.exit(0)`).
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.

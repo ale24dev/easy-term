@@ -14,7 +14,7 @@ use project_store::ProjectStore;
 use std::collections::HashSet;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, Runtime, WebviewWindow, WindowEvent,
+    AppHandle, Manager, Runtime, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::ShortcutState;
@@ -28,6 +28,25 @@ fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+/// Snapshots which projects are live so the next launch can restore them
+/// (best-effort: only covers a clean Quit, not a force-kill), then exits.
+/// Reachable only from the popover UI — see `tray.rs` for why there's no
+/// native tray menu item for this.
+pub(crate) fn quit(app: &AppHandle) {
+    let manager = app.state::<ProcessManager>();
+    let store = app.state::<ProjectStore>();
+    let running_ids: HashSet<String> = manager
+        .snapshot_statuses()
+        .into_iter()
+        .filter(|(_, status)| matches!(status, ProjectStatus::Running | ProjectStatus::Starting))
+        .map(|(id, _)| id)
+        .collect();
+    if let Err(e) = store.set_was_running(&running_ids) {
+        e.emit();
+    }
+    app.exit(0);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -64,55 +83,11 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // No `.menu(...)` here on purpose — see tray.rs's module comment.
+            // Any attached menu makes macOS show it on every click, not just
+            // right-click, which breaks left-click-to-toggle entirely.
             TrayIconBuilder::with_id(tray::TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    let id = event.id().as_ref();
-                    if id == "quit" {
-                        // Snapshot which projects are live so the next
-                        // launch can restore them (best-effort: only covers
-                        // a clean Quit, not a force-kill).
-                        let manager = app.state::<ProcessManager>();
-                        let store = app.state::<ProjectStore>();
-                        let running_ids: HashSet<String> = manager
-                            .snapshot_statuses()
-                            .into_iter()
-                            .filter(|(_, status)| {
-                                matches!(status, ProjectStatus::Running | ProjectStatus::Starting)
-                            })
-                            .map(|(id, _)| id)
-                            .collect();
-                        if let Err(e) = store.set_was_running(&running_ids) {
-                            e.emit();
-                        }
-                        app.exit(0);
-                        return;
-                    }
-
-                    if let Some(project_id) = id.strip_prefix("toggle:") {
-                        let app = app.clone();
-                        let project_id = project_id.to_string();
-                        // start()/stop() can block briefly (stop waits up to
-                        // 3s for a graceful exit) — never do that on the
-                        // menu event callback.
-                        std::thread::spawn(move || {
-                            let manager = app.state::<ProcessManager>();
-                            let running = matches!(
-                                manager.status_of(&project_id),
-                                ProjectStatus::Running | ProjectStatus::Starting
-                            );
-                            if running {
-                                let _ = process_manager::stop(&app, &project_id);
-                            } else {
-                                let store = app.state::<ProjectStore>();
-                                if let Some(project) = store.get(&project_id) {
-                                    let _ = process_manager::start(&app, project);
-                                }
-                            }
-                        });
-                    }
-                })
                 .on_tray_icon_event(|tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
 
@@ -129,9 +104,8 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Populates the tray menu (project list + Quit) now that the
-            // icon exists; subsequent refreshes happen on every status/
-            // project change.
+            // Sets the initial title/tooltip now that the icon exists;
+            // subsequent refreshes happen on every status/project change.
             tray::refresh(app.handle());
 
             if let Some(window) = app.get_webview_window("main") {
@@ -177,6 +151,7 @@ pub fn run() {
             commands::stop_group,
             commands::get_project_stats,
             commands::open_in_editor,
+            commands::quit_app,
             script_detector::detect_scripts,
             port_checker::check_port,
             port_checker::kill_port_owner,

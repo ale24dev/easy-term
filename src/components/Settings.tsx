@@ -101,6 +101,13 @@ export function Settings() {
           ))}
         </ul>
       )}
+
+      {/* No native "Quit" item in the tray's right-click menu — attaching
+          any menu makes macOS show it on every click, left included, which
+          would break click-to-toggle. This button is the only way out. */}
+      <button type="button" className="quit-button" onClick={() => ipc.quitApp()}>
+        Salir de easy-term
+      </button>
     </div>
   );
 }

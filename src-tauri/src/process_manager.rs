@@ -98,15 +98,6 @@ impl ProcessManager {
         self.statuses.lock().unwrap().clone()
     }
 
-    pub fn status_of(&self, id: &str) -> ProjectStatus {
-        self.statuses
-            .lock()
-            .unwrap()
-            .get(id)
-            .copied()
-            .unwrap_or(ProjectStatus::Stopped)
-    }
-
     pub fn error_count(&self, id: &str) -> u32 {
         self.error_counts
             .lock()

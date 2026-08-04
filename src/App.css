@@ -564,6 +564,16 @@ select:focus {
   font-size: 10px;
 }
 
+.quit-button {
+  flex-shrink: 0;
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.quit-button:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f0f0f0;

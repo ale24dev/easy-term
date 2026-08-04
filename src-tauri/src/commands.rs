@@ -172,3 +172,8 @@ pub fn open_in_editor(path: String) -> Result<(), AppError> {
         "No se encontró \"cursor\" ni \"code\" en el PATH",
     ))
 }
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    crate::quit(&app);
+}
