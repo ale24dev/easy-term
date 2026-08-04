@@ -512,6 +512,62 @@ detrás de `cfg(target_os = "macos")` — corre en cualquier plataforma, así qu
 por un `cargo check`/`clippy`/`build` real en este sandbox Linux (los cambios específicos de
 AppKit en `macos_window.rs` siguen sin poder compilarse acá, misma limitación de siempre).
 
+**Quinto seguimiento — investigación a fondo: causa raíz encontrada y fix canónico aplicado.**
+A pedido explícito del usuario ("investiga en la web, en issues, etc, el por qué de esto") se
+hizo la investigación que debió hacerse antes de iterar parches. Hallazgos, con fuentes:
+
+- **La causa raíz no eran los flags — era el *show path*.** tao (la capa de ventanas de
+  Tauri) implementa `set_visible(true)` con `makeKeyAndOrderFront` y `set_focus()` con
+  `makeKeyAndOrderFront` + `activateIgnoringOtherApps:YES` (verificado en el código fuente de
+  tao 0.35, `platform_impl/macos/util/async.rs`). Una `NSWindow` común solo puede volverse
+  key si su app está *activa* — y activar esta app (Accessory) mientras otra app es dueña de
+  la Space fullscreen frontal hace que macOS intente una transición de foco/Space y rebote la
+  activación de vuelta a la app fullscreen. Ese rebote es *exactamente* el parpadeo que
+  reportó el usuario ("como si se hiciera focus y se quitara"). En el rebote, nuestra ventana
+  o nunca llega a ordenarse en esa Space, o retiene key un instante y lo pierde — y el
+  hide-on-blur la ocultaba. Por eso `collectionBehavior` + `level` (fixes 1-3) eran
+  necesarios pero **nunca** iban a alcanzar.
+- **Es una limitación conocida y sin fix planificado en Tauri**: pedir esto está en
+  tauri-apps/tauri#5793 ("show window on top of full-screen app", cerrado como *not
+  planned*), tauri-apps/tauri#11488 (`visibleOnAllWorkspaces` no cubre Spaces fullscreen) y
+  tauri-apps/tauri#9556; el soporte de ventanas tipo panel es un feature request abierto en
+  tauri-apps/tao#136.
+- **La solución nativa de macOS** (la que usan Spotlight y todas las apps Swift de barra de
+  menú revisadas: NotchDrop, NotesOllama, el PIP de Telegram, etc.) es un **`NSPanel` con
+  `NSWindowStyleMaskNonActivatingPanel`**: un panel así puede volverse key **sin activar la
+  app**, así que la Space fullscreen nunca se ve perturbada — sin rebote, sin parpadeo.
+- **El estándar comunitario en Tauri** es el crate `tauri-nspanel` (ahkohd), que swizzlea la
+  clase Objective-C de la ventana existente a una subclase de `NSPanel`. Es lo que usa el
+  ejemplo canónico de menubar app (`ahkohd/tauri-macos-menubar-app-example`, branch
+  `v2-popover`), y el crate trae un ejemplo `examples/fullscreen` que es literalmente nuestro
+  caso, con comentarios que dicen "Ensures the panel cannot activate the app" y "display on
+  the same space as the full screen window". Ambos repos se **clonaron y leyeron completos**
+  en esta sesión (el acceso git a github.com sí funciona en este sandbox, a diferencia del
+  toolchain de compilación) para copiar la configuración exacta, no de memoria.
+
+Implementación (espeja el ejemplo canónico casi línea por línea):
+- `tauri-nspanel` branch `v2` como dependencia solo-macOS (Cargo.lock la fija al commit
+  `18ffb9a2`, el mismo HEAD contra el que compila el ejemplo canónico), plugin registrado con
+  cfg-gate.
+- `macos_window.rs` reescrito: `convert_to_menubar_panel` hace `window.to_panel()`, level
+  `NSMainMenuWindowLevel + 1`, `CanJoinAllSpaces | Stationary | FullScreenAuxiliary`, style
+  mask `NonActivatingPanel`, y un `panel_delegate!` con `window_did_resign_key` /
+  `window_did_become_key`.
+- **Efecto colateral manejado**: `set_delegate` reemplaza el NSWindowDelegate por el que
+  fluían los eventos `Focused` de Tauri — así que el hide-on-blur viejo queda mudo en macOS.
+  El delegate del panel asume ambos roles: oculta el panel al perder key (respetando
+  `SuppressAutoHide` para el picker de carpeta, más un chequeo de "¿somos la app frontmost?"
+  copiado del ejemplo canónico que cubre el caso del diálogo nativo), y re-emite las
+  transiciones de foco como evento `easyterm://panel-focus` que `App.tsx` ahora escucha para
+  el polling de CPU/RAM (antes dependía de `onFocusChanged`, que muere con el swizzle).
+- `toggle_popover` en macOS usa `panel.show()` / `panel.order_out(None)` (con fallback al
+  path viejo si la conversión falló); el posicionamiento sigue siendo de
+  `tauri-plugin-positioner` (opera vía `setFrame`, que un panel hereda sin cambios).
+
+Misma limitación de compilación de siempre para el código AppKit, pero con una diferencia
+importante: esta vez la configuración no es una hipótesis propia sino la copia fiel de dos
+ejemplos publicados y funcionando del autor del crate, leídos desde el código fuente real.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.

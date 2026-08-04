@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { ChevronLeftIcon, PlusIcon, SlidersHorizontalIcon } from "lucide-react";
 import "./App.css";
 import { ProjectList } from "./components/ProjectList";
@@ -112,19 +113,33 @@ function App() {
       }
     }
 
-    const unlistenPromise = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    function onFocusChanged(focused: boolean) {
       if (focused) {
+        if (interval) return;
         poll();
         interval = setInterval(poll, RESOURCE_POLL_INTERVAL_MS);
       } else if (interval) {
         clearInterval(interval);
         interval = null;
       }
-    });
+    }
+
+    const unlistenPromise = getCurrentWindow().onFocusChanged(({ payload: focused }) =>
+      onFocusChanged(focused),
+    );
+
+    // On macOS the popover is a swizzled NSPanel whose delegate replaces the
+    // one Tauri's focus events flow through, so onFocusChanged above goes
+    // quiet there — the backend re-emits the panel's own key-window
+    // transitions on this channel instead (see macos_window.rs).
+    const unlistenPanelFocus = listen<boolean>("easyterm://panel-focus", (event) =>
+      onFocusChanged(event.payload),
+    );
 
     return () => {
       if (interval) clearInterval(interval);
       unlistenPromise.then((unlisten) => unlisten());
+      unlistenPanelFocus.then((unlisten) => unlisten());
     };
   }, [setResourceStats]);
 

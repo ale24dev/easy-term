@@ -15,7 +15,6 @@ use process_manager::{ProcessManager, ProjectStatus};
 use project_store::ProjectStore;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, Runtime, WebviewWindow, WindowEvent,
@@ -34,50 +33,37 @@ use tauri_plugin_positioner::{Position, WindowExt};
 /// `end_native_dialog` commands (see `commands.rs`) to suppress that.
 pub(crate) struct SuppressAutoHide(pub AtomicBool);
 
-/// How long to ignore blur-triggered auto-hide right after showing the
-/// popover. Covers a transient focus-loss/refocus while AppKit settles the
-/// window onto a full-screen Space (see `toggle_popover`'s comment) without
-/// meaningfully delaying the normal click-away-to-dismiss behavior.
-const POST_SHOW_BLUR_GRACE: Duration = Duration::from_millis(700);
-
 fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
+    // The window is a non-activating NSPanel on macOS (see macos_window.rs)
+    // and must be shown through the panel API: tao's show()/set_focus() go
+    // through makeKeyAndOrderFront + activateIgnoringOtherApps, and
+    // activating the app is exactly what a full-screen Space rejects —
+    // that bounce was the whole bug. panel.show() orders the panel front
+    // and makes it key *without* activating the app.
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+        if let Ok(panel) = window.get_webview_panel("main") {
+            if panel.is_visible() {
+                panel.order_out(None);
+            } else {
+                let _ = window.move_window_constrained(Position::TrayCenter);
+                panel.show();
+                macos_window::log_window_diagnostics(window);
+            }
+            return;
+        }
+        // Panel conversion failed at setup (already logged) — fall back to
+        // the plain-window path below.
+    }
+
     if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
     } else {
-        // Re-applied on every show, not just once at startup: setting
-        // NSWindowCollectionBehavior on a window that has never been
-        // ordered front (this one starts with `visible: false`) is known
-        // not to reliably stick on macOS — see macos_window.rs.
-        #[cfg(target_os = "macos")]
-        macos_window::allow_join_fullscreen_space(window);
-
-        // Reported symptom: with another app full screen, clicking the tray
-        // makes the *other* app's screen flicker "like it briefly gets focus
-        // and loses it" — consistent with our own window winning focus for
-        // an instant while AppKit is still settling it onto that Space,
-        // immediately losing it again, and the hide-on-blur handler below
-        // reacting to that spurious blur by hiding the window right back
-        // before it's ever seen. Suppress hide-on-blur for a beat so that
-        // settling isn't mistaken for the user clicking away.
-        let suppress = window.state::<SuppressAutoHide>();
-        suppress.0.store(true, Ordering::SeqCst);
-        let clear_suppress = window.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(POST_SHOW_BLUR_GRACE);
-            clear_suppress
-                .state::<SuppressAutoHide>()
-                .0
-                .store(false, Ordering::SeqCst);
-        });
-
         let _ = window.move_window_constrained(Position::TrayCenter);
         let _ = window.show();
         let _ = window.set_focus();
 
-        // Diagnostic snapshot: dumps the window's actual AppKit state right
-        // after show() into the same log Settings → Diagnóstico shows, so a
-        // repro produces real facts instead of a yes/no. Safe to leave in —
-        // cheap, fires on every popover open.
         #[cfg(target_os = "macos")]
         macos_window::log_window_diagnostics(window);
     }
@@ -116,7 +102,7 @@ pub fn run() {
         })
         .build();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -125,7 +111,14 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
-        ))
+        ));
+
+    // Registers the panel store `to_panel()`/`get_webview_panel()` use —
+    // see macos_window.rs for why the popover must be an NSPanel.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .manage(ProjectStore::load())
         .manage(ProcessManager::new())
         .manage(SuppressAutoHide(AtomicBool::new(false)))
@@ -162,7 +155,18 @@ pub fn run() {
             // subsequent refreshes happen on every status/project change.
             tray::refresh(app.handle());
 
+            // Swizzle the popover into a non-activating NSPanel so it can
+            // open over a full-screen app's Space (see macos_window.rs).
+            #[cfg(target_os = "macos")]
+            macos_window::convert_to_menubar_panel(app.handle());
+
             if let Some(window) = app.get_webview_window("main") {
+                // On macOS this handler goes quiet once the panel delegate
+                // is installed above (the swizzle replaces the
+                // NSWindowDelegate tao events flow through) — the
+                // equivalent hide-on-resign-key logic lives in
+                // macos_window.rs. Kept for other platforms and for the
+                // fallback path when panel conversion fails.
                 let hide_on_blur = window.clone();
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
