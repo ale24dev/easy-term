@@ -14,12 +14,52 @@
   -webkit-text-size-adjust: 100%;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
   overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.03);
+  color: inherit;
+  padding: 5px 10px;
+}
+
+button:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input {
+  font-family: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 6px 8px;
+  outline: none;
+  width: 100%;
+}
+
+input:focus {
+  border-color: #3b82f6;
 }
 
 .popover {
@@ -31,6 +71,7 @@ body,
 .popover-header {
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   flex-shrink: 0;
@@ -39,6 +80,27 @@ body,
 .popover-title {
   font-weight: 600;
   font-size: 13px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popover-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.header-action {
+  font-weight: 500;
+}
+
+.header-back {
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 8px;
 }
 
 .empty-state {
@@ -58,10 +120,219 @@ body,
   color: rgba(0, 0, 0, 0.35);
 }
 
+/* Project list */
+
+.project-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.project-row:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.project-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.project-main:hover {
+  background: none;
+}
+
+.project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-port {
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.project-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.project-actions button {
+  padding: 3px 7px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #9ca3af;
+}
+
+.status-dot.status-running {
+  background: #22c55e;
+}
+
+.status-dot.status-starting {
+  background: #eab308;
+}
+
+.status-dot.status-crashed {
+  background: #ef4444;
+}
+
+.status-dot.status-stopped {
+  background: #9ca3af;
+}
+
+/* Project form */
+
+.project-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.path-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.path-picker input {
+  flex: 1;
+}
+
+.env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.env-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.icon-button {
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+
+.add-env {
+  align-self: flex-start;
+}
+
+.form-error {
+  color: #ef4444;
+  font-size: 12px;
+  margin: 0;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.form-actions .primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+}
+
+.form-actions .primary:hover {
+  background: #2563eb;
+}
+
+/* Log view */
+
+.log-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.log-view-host {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+}
+
+.terminal-host {
+  height: 100%;
+  width: 100%;
+}
+
+.follow-button {
+  position: absolute;
+  bottom: 12px;
+  right: 20px;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(30, 30, 30, 0.85);
+  color: white;
+  border: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.follow-button:hover {
+  background: rgba(10, 10, 10, 0.9);
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f0f0f0;
     background-color: #1e1e1e;
+  }
+
+  button {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  button:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  input {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.14);
   }
 
   .popover-header {
@@ -74,5 +345,17 @@ body,
 
   .empty-state .hint {
     color: rgba(255, 255, 255, 0.35);
+  }
+
+  .project-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .project-port {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .field {
+    color: rgba(255, 255, 255, 0.6);
   }
 }

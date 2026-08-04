@@ -152,27 +152,35 @@ la config persiste a JSON con escritura atómica (write-to-temp + rename).
 
 **Criterio de salida:** icono en el menu bar que abre/cierra un popover vacío.
 
-### Fase 1 — Core MVP (3–5 días)
+### Fase 1 — Core MVP (3–5 días) ✅ completada
 El objetivo: *usarla a diario reemplaza al menos una terminal*.
 
-- [ ] **1.1 Modelo + persistencia**: `project_store` con CRUD y JSON atómico.
-- [ ] **1.2 Formulario de proyecto**: picker de carpeta nativo (dialog de Tauri), nombre,
-      comando, puerto, env vars.
-- [ ] **1.3 `env_resolver`**: PATH real del login shell, cacheado al arranque.
-- [ ] **1.4 `process_manager`**: start/stop/restart sobre `portable-pty`, process groups,
-      reader-thread por proceso, eventos `process:*`.
-- [ ] **1.5 LogView con xterm.js**: colores ANSI, autoscroll con pausa al scrollear arriba
-      (botón "↓ seguir" para volver), fit addon.
-- [ ] **1.6 Lista de proyectos**: estado con dot de color, botones start/stop/restart,
+- [x] **1.1 Modelo + persistencia**: `project_store` con CRUD y JSON atómico
+      (write-to-temp + rename) en `~/Library/Application Support/easy-term/projects.json`.
+- [x] **1.2 Formulario de proyecto**: picker de carpeta nativo (`tauri-plugin-dialog`), nombre,
+      comando, puerto, env vars (filas clave/valor).
+- [x] **1.3 `env_resolver`**: PATH real del login shell, cacheado al arranque.
+- [x] **1.4 `process_manager`**: start/stop/restart sobre `portable-pty`, process groups
+      (`setsid` + `killpg` SIGTERM→SIGKILL con timeout de 3s), reader/batcher/waiter threads
+      por proceso, eventos `process:status|output|exit|url-detected`, ring buffer de 1MB.
+- [x] **1.5 LogView con xterm.js**: colores ANSI, autoscroll con pausa al scrollear arriba
+      y botón "↓ seguir" para volver, fit addon, instancias persistentes por proyecto
+      (`lib/terminals.ts`).
+- [x] **1.6 Lista de proyectos**: estado con dot de color, botones start/stop/restart,
       click → ver logs.
-- [ ] **1.7 Estados y exits**: distinguir exit limpio vs crash; badge "crashed".
-- [ ] **1.8 `error_logger` (base)**: tipo `AppError` con códigos, writer JSONL con canal
-      mpsc, panic hook, rotación/retención, captura global en frontend + comando
-      `log_app_error` (ver sección 7). Se monta desde el principio para que el resto
-      del desarrollo ya se beneficie de él.
+- [x] **1.7 Estados y exits**: distinguir exit limpio vs crash; marcador de color en el
+      propio log al terminar el proceso.
+- [x] **1.8 `error_logger` (base)**: tipo `AppError` con códigos, writer JSONL con canal
+      mpsc, panic hook, rotación/retención, dedupe de errores repetidos, captura global
+      en frontend + comando `log_app_error` (ver sección 7).
 
-**Criterio de salida:** agrego mi proyecto, `pnpm run dev` corre con colores, veo logs,
-paro y no quedan zombis (`lsof -i :PUERTO` limpio).
+**Criterio de salida:** ✅ verificado end-to-end (Linux, vía Xvfb + xdotool, ya que esta
+sesión no tiene acceso a macOS): se crea un proyecto con el folder picker nativo, se persiste
+en `projects.json`, `sh run.sh` corre en un PTY real con colores/output en vivo en xterm.js,
+la URL `http://localhost:5173` se detecta, y al detener el proyecto el proceso se mata
+limpiamente sin dejar zombis (`ps aux` confirmado). Cero eventos en el log de diagnóstico
+durante la prueba. Pendiente de validar en macOS real: posicionamiento del popover respecto
+al tray, `ActivationPolicy::Accessory`, y el picker de carpetas nativo (NSOpenPanel).
 
 ### Fase 2 — Los features que justifican la app (3–4 días)
 - [ ] **2.1 Detección automática** (`script_detector`): al escoger carpeta, parsear

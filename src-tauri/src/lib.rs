@@ -1,3 +1,11 @@
+mod commands;
+mod env_resolver;
+mod error_logger;
+mod process_manager;
+mod project_store;
+
+use process_manager::ProcessManager;
+use project_store::ProjectStore;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -20,7 +28,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(ProjectStore::load())
+        .manage(ProcessManager::new())
         .setup(|app| {
+            error_logger::init(app.package_info().version.to_string(), std::env::consts::OS);
+            env_resolver::init();
+
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -63,7 +77,18 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![
+            commands::list_projects,
+            commands::save_project,
+            commands::delete_project,
+            commands::start_project,
+            commands::stop_project,
+            commands::restart_project,
+            commands::get_process_output,
+            error_logger::log_app_error,
+            error_logger::read_error_log,
+            error_logger::open_logs_folder,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
