@@ -418,6 +418,31 @@ de `NSWindow::collectionBehavior`/`setCollectionBehavior` y los bits de
 `NSWindowCollectionBehavior` se verificaron a mano contra el código fuente del crate
 instalado. Aun así, esto necesita confirmarse en una Mac real — no está probado.
 
+**Seguimiento: el fix de arriba no alcanzó — el usuario confirmó que el problema seguía
+pasando.** Investigando más (comparando con la implementación de Electron para
+`setVisibleOnAllWorkspaces({ visibleOnFullScreen: true })`, que usa exactamente los mismos
+dos flags `CanJoinAllSpaces | FullScreenAuxiliary`, y con un issue de Tauri —
+tauri-apps/tauri#5566— donde `setLevel_`/`setCollectionBehavior_` "funciona en dev pero no
+después de empaquetar") apareció un problema de *timing*, no de flags: `collectionBehavior`
+se estaba seteando **una sola vez en `setup()`**, sobre una ventana con `"visible": false` en
+`tauri.conf.json` — es decir, una ventana que en ese momento nunca fue mostrada/"realizada"
+por el WindowServer. Fijar `collectionBehavior` sobre una `NSWindow` que todavía no fue
+ordenada al frente ni una vez es conocido por no "pegar" de forma confiable en macOS (calza
+con el patrón "funciona en dev, no en release" del issue de Tauri: el flujo de dev
+probablemente termina mostrando la ventana en algún punto antes, dejando que la propiedad se
+aplique correctamente por casualidad).
+
+Corregido moviendo la llamada a `allow_join_fullscreen_space` de `setup()` a
+`toggle_popover()`, justo antes de cada `window.show()` — se reaplica en cada apertura real
+(tanto desde el click del tray como desde el atajo global `Alt+Space`, ambos pasan por esa
+misma función) en vez de una sola vez sobre una ventana todavía no realizada. Los flags en sí
+(`CanJoinAllSpaces | FullScreenAuxiliary`) quedaron sin cambios — coinciden con los que usa
+Electron internamente para la misma feature, así que no eran el problema.
+
+**Misma limitación de antes, sin poder verificarlo**: el cfg-gate `target_os = "macos"` hace
+que ni siquiera este cambio de *dónde* se llama la función se compile en este sandbox Linux
+— sigue pendiente de confirmación real.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.

@@ -37,6 +37,13 @@ fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
     if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
     } else {
+        // Re-applied on every show, not just once at startup: setting
+        // NSWindowCollectionBehavior on a window that has never been
+        // ordered front (this one starts with `visible: false`) is known
+        // not to reliably stick on macOS — see macos_window.rs.
+        #[cfg(target_os = "macos")]
+        macos_window::allow_join_fullscreen_space(window);
+
         let _ = window.move_window_constrained(Position::TrayCenter);
         let _ = window.show();
         let _ = window.set_focus();
@@ -123,9 +130,6 @@ pub fn run() {
             tray::refresh(app.handle());
 
             if let Some(window) = app.get_webview_window("main") {
-                #[cfg(target_os = "macos")]
-                macos_window::allow_join_fullscreen_space(&window);
-
                 let hide_on_blur = window.clone();
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
