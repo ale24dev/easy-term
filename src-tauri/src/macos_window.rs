@@ -1,3 +1,9 @@
+// tauri-nspanel (branch v2) re-exports the `cocoa` crate, which is wholly
+// deprecated in favor of objc2 — every use through it warns. Same silencing
+// the canonical menubar example uses; goes away if we later migrate to the
+// crate's objc2-based v2.1 branch.
+#![allow(deprecated)]
+
 //! macOS-only: makes the popover reachable while another app is full
 //! screen, by converting it from a regular `NSWindow` into a
 //! non-activating `NSPanel`.
