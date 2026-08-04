@@ -294,6 +294,48 @@ en sí, pero confirma que no hay regresión): seleccionar carpeta completa `path
 detección de scripts con normalidad. Pendiente confirmar en macOS real que el picker ya no se
 cierra solo.
 
+### Fase 3.7 — Suite de pruebas en capas
+
+Hasta acá, todo el testing había sido manual (Xvfb + xdotool en el sandbox Linux, más
+verificación puntual en macOS real para los dos bugs de arriba) — cero tests automatizados,
+y el CI solo corría `tsc --noEmit` + `cargo fmt/check`. A raíz del segundo bug de macOS real
+(picker de carpeta), se armó una suite en tres capas, cada una con un propósito distinto:
+
+- [x] **Rust (`cargo test`, 41 tests)**: unitarios/integración para toda la lógica de negocio
+      que no depende de un `AppHandle` real — `project_store` (CRUD, persistencia atómica,
+      grupos, `wasRunning`), `script_detector` (detección de package manager, parseo de
+      scripts), `port_checker` (contra un listener real vía `python3 -m http.server`, no
+      mocks), `env_resolver` (resolución de PATH vía shell), y de `process_manager` el backoff
+      exponencial + detección de URL + conteo de líneas de error (extraídos a funciones puras)
+      más un smoke test directo sobre `portable-pty` que valida los supuestos de
+      setsid/process-group que `start()`/`stop()` dan por sentado. `store_path` en
+      `project_store` se inyectó (antes era un global fijo a `~/Library/Application Support`)
+      para poder apuntar los tests a un tempdir sin tocar datos reales.
+- [x] **Frontend (`pnpm test`, Vitest, 16 tests)**: el store de Zustand (`stores/projects.ts`)
+      con `ipc` mockeado — altas/ediciones in-place, que ningún método propague un error de
+      ipc, y que los setters de runtime mergeen en vez de reemplazar.
+- [x] **macOS UI E2E (`e2e/macos/`, AppleScript vía System Events)**: la única capa que
+      realmente ejercita AppKit — las dos capas anteriores corren en Linux y por diseño no
+      hubieran detectado ninguno de los dos bugs reales de esta fase (ambos específicos de
+      AppKit). `tauri-driver`/WebDriver, la herramienta que Tauri recomienda para E2E, **no
+      soporta macOS** (solo Linux/Windows), así que esta capa maneja la app compilada
+      directamente por accesibilidad: clic en el ícono del tray, click en botones por su texto
+      accesible (`name`/`help`/`description`, ya que los botones de ícono usan `title=` en vez
+      de texto visible), "Ir a la carpeta" (⌘⇧G) para el picker nativo. Cuatro flujos:
+      `01_tray_toggle` y `02_folder_picker` son regresión directa de los dos bugs recién
+      corregidos; `03_project_crud` es el happy path (crear/iniciar/detener/eliminar, con un
+      `sleep 30` en vez de un dev server real para no depender de pnpm/red); `04_quit` valida
+      que "Salir de easy-term" mata el proceso de verdad.
+
+**Nota de confianza sobre la capa E2E de macOS**: se escribió sin acceso a una Mac real para
+correrla — los selectores de accesibilidad siguen convenciones documentadas pero no están
+verificados contra una corrida real. Por eso el job `macos-e2e` en CI está con
+`continue-on-error: true`: corre en cada push/PR contra `macos-latest`, pero no bloquea el
+merge todavía. Una vez que una corrida real confirme que los selectores funcionan (o se
+ajusten los que no), sacar el `continue-on-error` para que sí bloquee. `check` (tsc, fmt,
+clippy-equivalente, `cargo test`, `pnpm test`) sí es bloqueante desde ya — esa capa se corrió
+y se verificó en este sandbox.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.
