@@ -5,15 +5,19 @@ mod notifications;
 mod port_checker;
 mod process_manager;
 mod project_store;
+mod resource_monitor;
 mod script_detector;
 mod tray;
 
 use process_manager::{ProcessManager, ProjectStatus};
 use project_store::ProjectStore;
+use std::collections::HashSet;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, Runtime, WebviewWindow, WindowEvent,
 };
+use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_positioner::{Position, WindowExt};
 
 fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
@@ -28,11 +32,28 @@ fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let global_shortcut_plugin = tauri_plugin_global_shortcut::Builder::new()
+        .with_shortcut("Alt+Space")
+        .expect("invalid global shortcut definition")
+        .with_handler(|app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+                if let Some(window) = app.get_webview_window("main") {
+                    toggle_popover(&window);
+                }
+            }
+        })
+        .build();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(global_shortcut_plugin)
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(ProjectStore::load())
         .manage(ProcessManager::new())
         .setup(|app| {
@@ -49,6 +70,22 @@ pub fn run() {
                 .on_menu_event(|app, event| {
                     let id = event.id().as_ref();
                     if id == "quit" {
+                        // Snapshot which projects are live so the next
+                        // launch can restore them (best-effort: only covers
+                        // a clean Quit, not a force-kill).
+                        let manager = app.state::<ProcessManager>();
+                        let store = app.state::<ProjectStore>();
+                        let running_ids: HashSet<String> = manager
+                            .snapshot_statuses()
+                            .into_iter()
+                            .filter(|(_, status)| {
+                                matches!(status, ProjectStatus::Running | ProjectStatus::Starting)
+                            })
+                            .map(|(id, _)| id)
+                            .collect();
+                        if let Err(e) = store.set_was_running(&running_ids) {
+                            e.emit();
+                        }
                         app.exit(0);
                         return;
                     }
@@ -106,6 +143,22 @@ pub fn run() {
                 });
             }
 
+            // Restore whatever was flagged `wasRunning` at the last clean
+            // Quit. Runs on its own thread so a handful of dev servers
+            // starting up can't delay the app from appearing.
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let store = app_handle.state::<ProjectStore>();
+                match store.take_was_running() {
+                    Ok(projects) => {
+                        for project in projects {
+                            let _ = process_manager::start(&app_handle, project);
+                        }
+                    }
+                    Err(e) => e.emit(),
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -118,6 +171,12 @@ pub fn run() {
             commands::get_process_output,
             commands::get_error_count,
             commands::reset_error_count,
+            commands::list_groups,
+            commands::find_or_create_group,
+            commands::start_group,
+            commands::stop_group,
+            commands::get_project_stats,
+            commands::open_in_editor,
             script_detector::detect_scripts,
             port_checker::check_port,
             port_checker::kill_port_owner,

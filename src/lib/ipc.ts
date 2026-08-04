@@ -73,6 +73,28 @@ export interface PortCheckResult {
   owner: PortOwner | null;
 }
 
+export interface Group {
+  id: string;
+  name: string;
+  projectIds: string[];
+}
+
+export interface RestartScheduledEvent {
+  id: string;
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+}
+
+export interface RestartExhaustedEvent {
+  id: string;
+}
+
+export interface ProcessStats {
+  cpuPercent: number;
+  memoryBytes: number;
+}
+
 export interface DiagnosticEvent {
   ts: string;
   level: "warn" | "error" | "fatal";
@@ -138,6 +160,12 @@ export const ipc = {
   readErrorLog: (day?: string, limit?: number) =>
     call<DiagnosticEvent[]>("read_error_log", { day, limit }),
   openLogsFolder: () => call<void>("open_logs_folder"),
+  listGroups: () => call<Group[]>("list_groups"),
+  findOrCreateGroup: (name: string) => call<Group>("find_or_create_group", { name }),
+  startGroup: (groupId: string) => call<void>("start_group", { groupId }),
+  stopGroup: (groupId: string) => call<void>("stop_group", { groupId }),
+  getProjectStats: (id: string) => call<ProcessStats | null>("get_project_stats", { id }),
+  openInEditor: (path: string) => call<void>("open_in_editor", { path }),
 };
 
 export function onProcessStatus(cb: (event: StatusEvent) => void) {
@@ -158,4 +186,12 @@ export function onUrlDetected(cb: (event: UrlDetectedEvent) => void) {
 
 export function onErrorCount(cb: (event: ErrorCountEvent) => void) {
   return listen<ErrorCountEvent>("process:error-count", (event) => cb(event.payload));
+}
+
+export function onRestartScheduled(cb: (event: RestartScheduledEvent) => void) {
+  return listen<RestartScheduledEvent>("process:restart-scheduled", (event) => cb(event.payload));
+}
+
+export function onRestartExhausted(cb: (event: RestartExhaustedEvent) => void) {
+  return listen<RestartExhaustedEvent>("process:restart-exhausted", (event) => cb(event.payload));
 }

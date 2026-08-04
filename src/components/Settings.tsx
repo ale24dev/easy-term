@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isEnabled, enable, disable } from "@tauri-apps/plugin-autostart";
 import { ipc, type DiagnosticEvent } from "../lib/ipc";
 
 const LEVEL_LABEL: Record<DiagnosticEvent["level"], string> = {
@@ -11,6 +12,7 @@ export function Settings() {
   const [events, setEvents] = useState<DiagnosticEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [autostart, setAutostart] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -26,7 +28,25 @@ export function Settings() {
 
   useEffect(() => {
     load();
+    isEnabled()
+      .then(setAutostart)
+      .catch(() => {
+        // Autostart status just stays at its default (off) if unreadable.
+      });
   }, []);
+
+  async function toggleAutostart() {
+    try {
+      if (autostart) {
+        await disable();
+      } else {
+        await enable();
+      }
+      setAutostart(!autostart);
+    } catch {
+      // Leave the toggle as-is — the OS-level state didn't change.
+    }
+  }
 
   async function copyLastError() {
     if (events.length === 0) return;
@@ -41,6 +61,11 @@ export function Settings() {
 
   return (
     <div className="settings">
+      <label className="checkbox-field">
+        <input type="checkbox" checked={autostart} onChange={toggleAutostart} />
+        <span>Iniciar con macOS</span>
+      </label>
+
       <div className="settings-toolbar">
         <button type="button" onClick={() => ipc.openLogsFolder()}>
           Abrir carpeta de logs

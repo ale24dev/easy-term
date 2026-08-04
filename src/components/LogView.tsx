@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getTerminal, hydrateFromBuffer } from "../lib/terminals";
 import { ipc } from "../lib/ipc";
 import { useProjectsStore } from "../stores/projects";
@@ -111,6 +111,15 @@ export function LogView({ projectId }: LogViewProps) {
     setAtBottom(true);
   }
 
+  async function copyUrl() {
+    if (!openableUrl) return;
+    try {
+      await navigator.clipboard.writeText(openableUrl);
+    } catch {
+      // Clipboard access denied — nothing more we can do here.
+    }
+  }
+
   return (
     <div className="log-view">
       {searchOpen && (
@@ -150,6 +159,23 @@ export function LogView({ projectId }: LogViewProps) {
             🌐 Abrir {openableUrl}
           </button>
         )}
+        <div className="quick-actions">
+          {project && (
+            <>
+              <button title="Abrir en el editor" onClick={() => ipc.openInEditor(project.path)}>
+                🖥
+              </button>
+              <button title="Abrir en Finder" onClick={() => revealItemInDir(project.path)}>
+                📁
+              </button>
+            </>
+          )}
+          {openableUrl && (
+            <button title="Copiar URL" onClick={copyUrl}>
+              📋
+            </button>
+          )}
+        </div>
       </div>
 
       {!atBottom && (

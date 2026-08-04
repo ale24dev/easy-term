@@ -221,20 +221,50 @@ usado aquí para probar `onAction`).
 **Criterio de salida:** configurar un proyecto nuevo son 2 clicks; un puerto ocupado se
 resuelve desde la app; me entero de un crash sin mirar la app.
 
-### Fase 3 — Power features (4–6 días)
-- [ ] **3.1 Grupos/workspaces**: entidad `Group`, "levantar todo" en orden secuencial con
-      espera simple entre arranques (readiness: puerto abierto o timeout). UI: sección
-      colapsable por grupo con botón start/stop grupal.
-- [ ] **3.2 Auto-restart on crash**: opt-in por proyecto; backoff exponencial (1s, 2s, 4s...
-      máx 30s) y límite de N intentos para no ciclar; badge "restarting (2/5)".
-- [ ] **3.3 Atajo global** (`tauri-plugin-global-shortcut`): `⌥+Space` (configurable)
-      muestra/oculta el popover, estilo Raycast.
-- [ ] **3.4 Acciones rápidas por proyecto**: abrir en VS Code/Cursor (`code .`/`cursor .`
-      con detección de cuál hay instalado), abrir en Finder, copiar URL.
-- [ ] **3.5 Monitor de recursos**: CPU/RAM por process-tree vía `sysinfo`, polling 2s solo
-      con el popover abierto; mini sparkline o texto junto a cada proyecto.
-- [ ] **3.6 Launch at login** (`tauri-plugin-autostart`) + restaurar proyectos que estaban
-      corriendo al cerrar (flag `wasRunning` persistido).
+### Fase 3 — Power features (4–6 días) ✅ completada
+- [x] **3.1 Grupos/workspaces**: entidad `Group` (persistida junto a `Project` en el mismo
+      archivo), "levantar todo" en orden secuencial con espera de readiness (puerto abierto,
+      poll cada 300ms, timeout de 8s; sin puerto → espera fija de 2s). UI: sección colapsable
+      por grupo con botones start/stop grupal; el campo "Grupo" del formulario resuelve o
+      crea el grupo por nombre.
+- [x] **3.2 Auto-restart on crash**: checkbox `autoRestart` por proyecto; backoff exponencial
+      (1s→2s→4s→8s→16s, cap 30s) con límite de 5 intentos; cancelación vía "epoch" al hacer
+      stop explícito (manual, restart, o delete); reset del contador solo si el proceso
+      sobrevivió ≥5s (ver nota de bug abajo). Badge "reintentando N/5" en la lista, con botón
+      "✕ Cancelar" mientras hay un reintento pendiente.
+- [x] **3.3 Atajo global** (`tauri-plugin-global-shortcut`): `Alt+Space` muestra/oculta el
+      popover, mismo path que el click izquierdo del tray.
+- [x] **3.4 Acciones rápidas por proyecto**: abrir en editor (`open_in_editor` prueba
+      `cursor` y luego `code` vía PATH resuelto), abrir en Finder (`revealItemInDir`),
+      copiar URL — los tres como botones en `LogView`.
+- [x] **3.5 Monitor de recursos**: en vez de `sysinfo`, se optó por `ps -Ao pgid,pcpu,rss`
+      sumado por process-group (mismo enfoque que `port_checker`/`lsof`, sin dependencias
+      nuevas) — verificado que `pid == pgid` se cumple por el `setsid` de `portable-pty`.
+      Polling cada 2s desde el frontend, activo solo mientras la ventana tiene foco
+      (`onFocusChanged`).
+- [x] **3.6 Launch at login** (`tauri-plugin-autostart`, toggle en Settings) + restaurar
+      proyectos: flag `wasRunning` por proyecto, marcado al hacer Quit (snapshot de
+      proyectos en `running`/`starting`) y consumido una sola vez al arrancar.
+
+**Bug encontrado y corregido durante el testing E2E:** `start()` emitía `Running`
+inmediatamente al spawnear el proceso (antes de saber si sobrevivía), y `emit_status`
+reseteaba el contador de reintentos a 0 en cada `Running` — con un comando que crashea en
+milisegundos, esto hacía que el contador nunca superara 1 y el backoff se quedara fijo en
+~1s para siempre, sin llegar nunca al límite de 5 intentos (loop infinito). Se corrigió
+reemplazando el reset-on-Running por un reset condicionado a que el proceso haya vivido al
+menos `MIN_UPTIME_FOR_RESTART_RESET` (5s) antes de crashear — un proceso que crashea rápido
+sigue acumulando en la misma racha de backoff; uno que corrió un buen rato antes de morir
+empieza una racha nueva. Verificado con un proyecto que crashea al instante: deltas reales
+entre crashes de 1.01s, 2.01s, 4.01s, 8.01s, 16.01s y luego `PROC_RESTART_LIMIT_REACHED`
+una sola vez, sin más reintentos.
+
+**Validado end-to-end en Linux** (Xvfb + xdotool): grupo de 2 proyectos con start-all
+secuencial (readiness por puerto real vía `python3 -m http.server`) y stop-all concurrente
+sin procesos huérfanos; auto-restart con backoff exponencial real hasta agotar los 5
+intentos; notificación nativa de crash disparándose correctamente bajo Xvfb; cálculo de
+CPU/RAM verificado contra el `ps` real del proceso corriendo. Pendiente de confirmar en
+macOS real: el atajo global `Alt+Space` (no testeable de forma confiable vía X11 synthetic
+events) y el comportamiento exacto de `tauri-plugin-autostart` (macOS usa LaunchAgents).
 
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts

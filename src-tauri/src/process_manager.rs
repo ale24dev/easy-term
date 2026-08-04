@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 const MODULE: &str = "process_manager";
@@ -23,6 +23,15 @@ const RING_BUFFER_MAX: usize = 1024 * 1024;
 const FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 const GRACEFUL_TIMEOUT: Duration = Duration::from_secs(3);
 const READ_CHUNK: usize = 8192;
+const MAX_RESTART_ATTEMPTS: u32 = 5;
+const RESTART_BASE_DELAY_MS: u64 = 1000;
+const RESTART_MAX_DELAY_MS: u64 = 30_000;
+const GROUP_READINESS_TIMEOUT: Duration = Duration::from_secs(8);
+const GROUP_READINESS_POLL: Duration = Duration::from_millis(300);
+/// A process must survive at least this long to count as a successful
+/// (re)start — below it, a crash is treated as a continuation of the same
+/// backoff sequence rather than a fresh one starting over at attempt 1.
+const MIN_UPTIME_FOR_RESTART_RESET: Duration = Duration::from_secs(5);
 
 static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"https?://(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s\x1b]*").unwrap()
@@ -58,6 +67,16 @@ struct ProcessHandle {
     stopping: Arc<AtomicBool>,
 }
 
+/// Tracks auto-restart backoff for one project. `epoch` is bumped by any
+/// explicit `stop()` (manual stop, restart, or delete) so an in-flight
+/// scheduled restart can detect it was cancelled and no-op instead of
+/// reviving a project the user just asked to stop.
+#[derive(Default, Clone, Copy)]
+struct RestartState {
+    attempts: u32,
+    epoch: u64,
+}
+
 #[derive(Default)]
 pub struct ProcessManager {
     processes: Mutex<HashMap<String, ProcessHandle>>,
@@ -67,6 +86,7 @@ pub struct ProcessManager {
     statuses: Mutex<HashMap<String, ProjectStatus>>,
     /// Count of error/warn-looking lines seen since the log was last opened.
     error_counts: Mutex<HashMap<String, u32>>,
+    restart_state: Mutex<HashMap<String, RestartState>>,
 }
 
 impl ProcessManager {
@@ -106,6 +126,11 @@ impl ProcessManager {
     pub fn forget(&self, id: &str) {
         self.statuses.lock().unwrap().remove(id);
         self.error_counts.lock().unwrap().remove(id);
+        self.restart_state.lock().unwrap().remove(id);
+    }
+
+    pub fn pid_of(&self, id: &str) -> Option<i32> {
+        self.processes.lock().unwrap().get(id).map(|h| h.pid)
     }
 }
 
@@ -140,6 +165,20 @@ struct ErrorCountPayload {
     count: u32,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RestartScheduledPayload {
+    id: String,
+    attempt: u32,
+    max_attempts: u32,
+    delay_ms: u64,
+}
+
+#[derive(Serialize, Clone)]
+struct RestartExhaustedPayload {
+    id: String,
+}
+
 fn emit_status(app: &AppHandle, id: &str, status: ProjectStatus, pid: Option<u32>) {
     let manager = app.state::<ProcessManager>();
     manager
@@ -147,6 +186,13 @@ fn emit_status(app: &AppHandle, id: &str, status: ProjectStatus, pid: Option<u32
         .lock()
         .unwrap()
         .insert(id.to_string(), status);
+
+    // Deliberately NOT resetting restart attempts here: "Running" fires
+    // optimistically right after spawn, before we know the process will
+    // actually stay up. Resetting on it would let a process that crashes
+    // instantly on every attempt "succeed" every time and never hit the
+    // backoff cap. The waiter thread resets attempts instead, based on how
+    // long the process actually survived.
 
     let _ = app.emit(
         "process:status",
@@ -202,6 +248,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
         cmd.env(key, value);
     }
 
+    let started_at = Instant::now();
     let child = pair.slave.spawn_command(cmd).map_err(|e| {
         emit_status(app, &project.id, ProjectStatus::Crashed, None);
         AppError::new(
@@ -256,6 +303,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
         child,
         exited,
         stopping,
+        started_at,
     );
 
     emit_status(app, &project.id, ProjectStatus::Running, Some(pid as u32));
@@ -265,6 +313,17 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
 
 pub fn stop(app: &AppHandle, id: &str) -> Result<(), AppError> {
     let manager = app.state::<ProcessManager>();
+
+    // Any explicit stop — manual, via restart(), or before a delete —
+    // cancels a pending auto-restart so it can't revive the project right
+    // after the user asked to stop it.
+    manager
+        .restart_state
+        .lock()
+        .unwrap()
+        .entry(id.to_string())
+        .or_default()
+        .epoch += 1;
 
     let (pid, exited) = {
         let processes = manager.processes.lock().unwrap();
@@ -303,6 +362,72 @@ pub fn restart(app: &AppHandle, project: Project) -> Result<(), AppError> {
     start(app, project)
 }
 
+/// Schedules an auto-restart attempt with exponential backoff (1s, 2s, 4s,
+/// … capped at 30s), up to `MAX_RESTART_ATTEMPTS`. Called only when a
+/// project with `auto_restart` enabled crashes.
+fn schedule_restart(app: &AppHandle, project: Project) {
+    let manager = app.state::<ProcessManager>();
+    let (attempt, epoch) = {
+        let mut state = manager.restart_state.lock().unwrap();
+        let entry = state.entry(project.id.clone()).or_default();
+        entry.attempts += 1;
+        (entry.attempts, entry.epoch)
+    };
+
+    if attempt > MAX_RESTART_ATTEMPTS {
+        log_error(
+            Level::Warn,
+            Source::Backend,
+            MODULE,
+            "PROC_RESTART_LIMIT_REACHED",
+            format!(
+                "\"{}\" superó {MAX_RESTART_ATTEMPTS} reintentos automáticos",
+                project.name
+            ),
+            Some(serde_json::json!({ "projectId": project.id })),
+            None,
+        );
+        let _ = app.emit(
+            "process:restart-exhausted",
+            RestartExhaustedPayload {
+                id: project.id.clone(),
+            },
+        );
+        return;
+    }
+
+    let delay_ms =
+        (RESTART_BASE_DELAY_MS.saturating_mul(1 << (attempt - 1))).min(RESTART_MAX_DELAY_MS);
+
+    let _ = app.emit(
+        "process:restart-scheduled",
+        RestartScheduledPayload {
+            id: project.id.clone(),
+            attempt,
+            max_attempts: MAX_RESTART_ATTEMPTS,
+            delay_ms,
+        },
+    );
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+
+        let manager = app.state::<ProcessManager>();
+        let still_valid = manager
+            .restart_state
+            .lock()
+            .unwrap()
+            .get(&project.id)
+            .map(|s| s.epoch)
+            == Some(epoch);
+
+        if still_valid {
+            let _ = start(&app, project);
+        }
+    });
+}
+
 pub fn get_output(app: &AppHandle, id: &str) -> String {
     let manager = app.state::<ProcessManager>();
     let processes = manager.processes.lock().unwrap();
@@ -312,6 +437,63 @@ pub fn get_output(app: &AppHandle, id: &str) -> String {
             String::from_utf8_lossy(&buf).into_owned()
         }
         None => String::new(),
+    }
+}
+
+/// Starts every project in a group one at a time, in order, waiting for
+/// each to look "ready" (its port opens, or a fixed grace period for
+/// projects with no configured port) before moving on to the next. Runs on
+/// its own thread — the caller gets progress via the usual `process:status`
+/// events, not a blocking return.
+pub fn start_group(app: &AppHandle, projects: Vec<Project>) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for project in projects {
+            let port = project.port;
+            let id = project.id.clone();
+            let name = project.name.clone();
+
+            if let Err(e) = start(&app, project) {
+                log_error(
+                    Level::Warn,
+                    Source::Backend,
+                    MODULE,
+                    "PROC_GROUP_START_FAILED",
+                    format!("No se pudo iniciar \"{name}\" dentro del grupo: {e}"),
+                    Some(serde_json::json!({ "projectId": id })),
+                    None,
+                );
+                continue;
+            }
+
+            match port {
+                Some(port) => wait_for_port_ready(port, GROUP_READINESS_TIMEOUT),
+                None => std::thread::sleep(Duration::from_secs(2)),
+            }
+        }
+    });
+}
+
+/// Stops every project in a group concurrently (order doesn't matter for
+/// shutdown), so an N-project group stops in ~3s total instead of N × 3s.
+pub fn stop_group(app: &AppHandle, project_ids: Vec<String>) {
+    for id in project_ids {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let _ = stop(&app, &id);
+        });
+    }
+}
+
+fn wait_for_port_ready(port: u16, timeout: Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if let Ok(result) = crate::port_checker::check_port(port) {
+            if !result.free {
+                return;
+            }
+        }
+        std::thread::sleep(GROUP_READINESS_POLL);
     }
 }
 
@@ -492,6 +674,7 @@ fn spawn_waiter_thread(
     mut child: Box<dyn Child + Send + Sync>,
     exited: ExitSignal,
     stopping: Arc<AtomicBool>,
+    started_at: Instant,
 ) {
     std::thread::Builder::new()
         .name(format!("pty-wait-{id}"))
@@ -534,6 +717,21 @@ fn spawn_waiter_thread(
                     None,
                 );
                 crate::notifications::notify_crash(&app, &id, &name, code);
+
+                // A process that ran for a while before dying gets a clean
+                // slate: this crash starts a new backoff sequence at attempt
+                // 1, rather than compounding on however many attempts a much
+                // earlier, unrelated crash loop had already burned through.
+                if started_at.elapsed() >= MIN_UPTIME_FOR_RESTART_RESET {
+                    manager.restart_state.lock().unwrap().remove(&id);
+                }
+
+                let store = app.state::<crate::project_store::ProjectStore>();
+                if let Some(project) = store.get(&id) {
+                    if project.auto_restart {
+                        schedule_restart(&app, project);
+                    }
+                }
             }
 
             emit_status(&app, &id, final_status, None);

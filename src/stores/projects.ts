@@ -1,11 +1,19 @@
 import { create } from "zustand";
-import { ipc, type Project, type ProjectInput, type ProjectStatus } from "../lib/ipc";
+import { ipc, type Group, type Project, type ProjectInput, type ProjectStatus } from "../lib/ipc";
+
+interface RestartInfo {
+  attempt: number;
+  maxAttempts: number;
+}
 
 interface ProjectRuntime {
   status: ProjectStatus;
   pid: number | null;
   detectedUrl: string | null;
   errorCount: number;
+  restartInfo: RestartInfo | null;
+  cpuPercent: number | null;
+  memoryBytes: number | null;
 }
 
 export const DEFAULT_RUNTIME: ProjectRuntime = {
@@ -13,28 +21,38 @@ export const DEFAULT_RUNTIME: ProjectRuntime = {
   pid: null,
   detectedUrl: null,
   errorCount: 0,
+  restartInfo: null,
+  cpuPercent: null,
+  memoryBytes: null,
 };
 
 interface ProjectsState {
   projects: Project[];
+  groups: Group[];
   runtime: Record<string, ProjectRuntime>;
   loaded: boolean;
 
   loadProjects: () => Promise<void>;
+  loadGroups: () => Promise<void>;
   saveProject: (input: ProjectInput) => Promise<Project | null>;
   deleteProject: (id: string) => Promise<void>;
   start: (id: string) => Promise<void>;
   stop: (id: string) => Promise<void>;
   restart: (id: string) => Promise<void>;
+  startGroup: (groupId: string) => Promise<void>;
+  stopGroup: (groupId: string) => Promise<void>;
 
   setStatus: (id: string, status: ProjectStatus, pid: number | null) => void;
   setDetectedUrl: (id: string, url: string) => void;
   setErrorCount: (id: string, count: number) => void;
   resetErrorCount: (id: string) => Promise<void>;
+  setRestartInfo: (id: string, info: RestartInfo | null) => void;
+  setResourceStats: (id: string, cpuPercent: number | null, memoryBytes: number | null) => void;
 }
 
 export const useProjectsStore = create<ProjectsState>((set) => ({
   projects: [],
+  groups: [],
   runtime: {},
   loaded: false,
 
@@ -44,6 +62,15 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
       set({ projects, loaded: true });
     } catch {
       set({ loaded: true });
+    }
+  },
+
+  loadGroups: async () => {
+    try {
+      const groups = await ipc.listGroups();
+      set({ groups });
+    } catch {
+      // Groups are an enhancement — an empty list just means no sections.
     }
   },
 
@@ -103,6 +130,22 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
     }
   },
 
+  startGroup: async (groupId) => {
+    try {
+      await ipc.startGroup(groupId);
+    } catch {
+      //
+    }
+  },
+
+  stopGroup: async (groupId) => {
+    try {
+      await ipc.stopGroup(groupId);
+    } catch {
+      //
+    }
+  },
+
   setStatus: (id, status, pid) =>
     set((state) => ({
       runtime: {
@@ -140,10 +183,26 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
       },
     }));
   },
+
+  setRestartInfo: (id, info) =>
+    set((state) => ({
+      runtime: {
+        ...state.runtime,
+        [id]: { ...(state.runtime[id] ?? DEFAULT_RUNTIME), restartInfo: info },
+      },
+    })),
+
+  setResourceStats: (id, cpuPercent, memoryBytes) =>
+    set((state) => ({
+      runtime: {
+        ...state.runtime,
+        [id]: { ...(state.runtime[id] ?? DEFAULT_RUNTIME), cpuPercent, memoryBytes },
+      },
+    })),
 }));
 
 export function getRuntime(id: string): ProjectRuntime {
   return useProjectsStore.getState().runtime[id] ?? DEFAULT_RUNTIME;
 }
 
-export type { ProjectRuntime };
+export type { ProjectRuntime, RestartInfo };

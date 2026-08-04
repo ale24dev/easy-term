@@ -18,6 +18,7 @@ interface ProjectFormProps {
 
 export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
   const saveProject = useProjectsStore((s) => s.saveProject);
+  const groups = useProjectsStore((s) => s.groups);
 
   const [name, setName] = useState(initial?.name ?? "");
   const [path, setPath] = useState(initial?.path ?? "");
@@ -27,6 +28,10 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
     initial ? Object.entries(initial.env).map(([key, value]) => ({ key, value })) : [],
   );
   const [scripts, setScripts] = useState<DetectedScript[]>([]);
+  const [groupName, setGroupName] = useState(
+    () => groups.find((g) => g.id === initial?.groupId)?.name ?? "",
+  );
+  const [autoRestart, setAutoRestart] = useState(initial?.autoRestart ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,6 +101,18 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
     setSaving(true);
     setError(null);
 
+    let groupId: string | null = null;
+    if (groupName.trim()) {
+      try {
+        const group = await ipc.findOrCreateGroup(groupName.trim());
+        groupId = group.id;
+      } catch {
+        setSaving(false);
+        setError("No se pudo crear/encontrar el grupo.");
+        return;
+      }
+    }
+
     const saved = await saveProject({
       id: initial?.id,
       name: name.trim(),
@@ -103,8 +120,8 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
       command: command.trim(),
       port: parsedPort,
       env,
-      autoRestart: initial?.autoRestart ?? false,
-      groupId: initial?.groupId ?? null,
+      autoRestart,
+      groupId,
     });
 
     setSaving(false);
@@ -172,6 +189,30 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
           placeholder="3000"
           inputMode="numeric"
         />
+      </label>
+
+      <label className="field">
+        <span>Grupo (opcional)</span>
+        <input
+          value={groupName}
+          onChange={(e) => setGroupName(e.target.value)}
+          placeholder="backend"
+          list="group-suggestions"
+        />
+        <datalist id="group-suggestions">
+          {groups.map((group) => (
+            <option key={group.id} value={group.name} />
+          ))}
+        </datalist>
+      </label>
+
+      <label className="checkbox-field">
+        <input
+          type="checkbox"
+          checked={autoRestart}
+          onChange={(e) => setAutoRestart(e.target.checked)}
+        />
+        <span>Reiniciar automáticamente si crashea</span>
       </label>
 
       <div className="field">
