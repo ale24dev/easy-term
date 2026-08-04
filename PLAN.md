@@ -391,6 +391,33 @@ Input, picker de carpeta nativo (GTK) sin regresión, fila de proyecto con badge
 acciones reveal-on-hover, crear/eliminar un proyecto de punta a punta. `cargo test` (41),
 `pnpm test` (16) y `pnpm build` (incluye `tsc`) siguen en verde.
 
+**Bug reportado en macOS real: la app no se podía abrir desde el tray con otra app en
+pantalla completa.** Un `NSWindow` solo puede aparecer, por defecto, en el Space en el que se
+mostró la última vez; `visible_on_all_workspaces` (que Tauri sí expone, pero que este proyecto
+nunca usó) lo agregaría a todos los Spaces *normales* — pero un Space ocupado por una app en
+pantalla completa es un Space exclusivo aparte, fuera de esa lista. Sin el flag
+`NSWindowCollectionBehaviorFullScreenAuxiliary` (el que usan utilidades de la barra de menú
+como Bartender/Ice/iStat Menus para poder mostrarse mientras otra app está en fullscreen), el
+click en el tray no tenía ningún efecto visible: el popover intentaba abrirse en un Space que
+el usuario no podía ver. Tauri/tao no exponen ese flag por su API pública, así que se agregó
+`macos_window.rs`, que toma el puntero crudo al `NSWindow` vía `window.ns_window()` y le
+suma `CanJoinAllSpaces | FullScreenAuxiliary` a su `collectionBehavior` directamente por
+`objc2`/`objc2-app-kit` (agregados como dependencia solo para `cfg(target_os = "macos")`,
+misma versión que ya traían tao/wry transitivamente — no se duplica ni diverge nada en
+`Cargo.lock`). Se llama una sola vez en `setup()`, ya que `collectionBehavior` es una
+propiedad persistente del `NSWindow`, no algo que se resetee entre `hide()`/`show()`.
+
+**Nota de confianza**: no se pudo compilar ni un `cargo check` de este código — este sandbox
+es Linux sin toolchain de cross-compilación a macOS (`objc2-exception-helper` necesita
+compilar un `.m` con `-arch`/`-mmacosx-version-min`, que el `cc` de Linux no soporta), así que
+un `cargo check --target x86_64-apple-darwin` falla en el build script antes de llegar a
+tipar el código nuevo. La superficie de riesgo se redujo lo más posible: `objc2`/
+`objc2-app-kit` ya son dependencias transitivas de tao/wry en las mismas versiones exactas
+(0.6.4/0.3.2, confirmado en `Cargo.lock` — no hay una segunda copia divergente), y las firmas
+de `NSWindow::collectionBehavior`/`setCollectionBehavior` y los bits de
+`NSWindowCollectionBehavior` se verificaron a mano contra el código fuente del crate
+instalado. Aun así, esto necesita confirmarse en una Mac real — no está probado.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.

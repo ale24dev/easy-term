@@ -1,6 +1,8 @@
 mod commands;
 mod env_resolver;
 mod error_logger;
+#[cfg(target_os = "macos")]
+mod macos_window;
 mod notifications;
 mod port_checker;
 mod process_manager;
@@ -121,6 +123,9 @@ pub fn run() {
             tray::refresh(app.handle());
 
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                macos_window::allow_join_fullscreen_space(&window);
+
                 let hide_on_blur = window.clone();
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
