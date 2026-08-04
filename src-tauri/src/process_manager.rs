@@ -353,6 +353,12 @@ pub fn restart(app: &AppHandle, project: Project) -> Result<(), AppError> {
     start(app, project)
 }
 
+/// Exponential backoff for restart attempt `attempt` (1-indexed): 1s, 2s,
+/// 4s, 8s, 16s, … capped at `RESTART_MAX_DELAY_MS`.
+fn backoff_delay_ms(attempt: u32) -> u64 {
+    (RESTART_BASE_DELAY_MS.saturating_mul(1 << (attempt - 1))).min(RESTART_MAX_DELAY_MS)
+}
+
 /// Schedules an auto-restart attempt with exponential backoff (1s, 2s, 4s,
 /// … capped at 30s), up to `MAX_RESTART_ATTEMPTS`. Called only when a
 /// project with `auto_restart` enabled crashes.
@@ -387,8 +393,7 @@ fn schedule_restart(app: &AppHandle, project: Project) {
         return;
     }
 
-    let delay_ms =
-        (RESTART_BASE_DELAY_MS.saturating_mul(1 << (attempt - 1))).min(RESTART_MAX_DELAY_MS);
+    let delay_ms = backoff_delay_ms(attempt);
 
     let _ = app.emit(
         "process:restart-scheduled",
@@ -599,15 +604,20 @@ fn detect_url(chunk: &[u8]) -> Option<String> {
         .map(|m| m.as_str().trim_end_matches(['/', ')', '"']).to_string())
 }
 
+/// Counts lines that look like an error/warning (case-insensitive whole-word
+/// "error"/"warn"/"warning").
+fn count_error_matches(text: &str) -> u32 {
+    text.lines()
+        .filter(|line| ERROR_LINE_RE.is_match(line))
+        .count() as u32
+}
+
 /// Counts lines in `chunk` that look like an error/warning, adds them to the
 /// project's running total, and returns the new total — or `None` when the
 /// chunk contributed nothing, so callers can skip emitting a no-op event.
 fn count_error_lines(app: &AppHandle, id: &str, chunk: &[u8]) -> Option<u32> {
     let text = String::from_utf8_lossy(chunk);
-    let matches = text
-        .lines()
-        .filter(|line| ERROR_LINE_RE.is_match(line))
-        .count() as u32;
+    let matches = count_error_matches(&text);
     if matches == 0 {
         return None;
     }
@@ -735,4 +745,212 @@ fn spawn_waiter_thread(
             );
         })
         .expect("failed to spawn pty waiter thread");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn backoff_delay_doubles_each_attempt_until_the_cap() {
+        assert_eq!(backoff_delay_ms(1), 1_000);
+        assert_eq!(backoff_delay_ms(2), 2_000);
+        assert_eq!(backoff_delay_ms(3), 4_000);
+        assert_eq!(backoff_delay_ms(4), 8_000);
+        assert_eq!(backoff_delay_ms(5), 16_000);
+        // MAX_RESTART_ATTEMPTS is 5, but the formula itself must not
+        // overflow or exceed the cap if it were ever called past that.
+        assert_eq!(backoff_delay_ms(6), 30_000);
+        assert_eq!(backoff_delay_ms(20), 30_000);
+    }
+
+    #[test]
+    fn detect_url_finds_a_localhost_url_with_port() {
+        let chunk = b"Local:   http://localhost:5173/\n";
+        assert_eq!(detect_url(chunk), Some("http://localhost:5173".to_string()));
+    }
+
+    #[test]
+    fn detect_url_finds_a_127_0_0_1_url() {
+        let chunk = b"Server running at http://127.0.0.1:3000";
+        assert_eq!(detect_url(chunk), Some("http://127.0.0.1:3000".to_string()));
+    }
+
+    #[test]
+    fn detect_url_strips_trailing_punctuation_and_slash() {
+        let chunk = b"see (http://localhost:8080/) for details";
+        assert_eq!(detect_url(chunk), Some("http://localhost:8080".to_string()));
+    }
+
+    #[test]
+    fn detect_url_ignores_non_local_hosts() {
+        let chunk = b"Deployed to https://example.com";
+        assert_eq!(detect_url(chunk), None);
+    }
+
+    #[test]
+    fn detect_url_returns_none_when_nothing_matches() {
+        let chunk = b"just some ordinary log output\n";
+        assert_eq!(detect_url(chunk), None);
+    }
+
+    #[test]
+    fn count_error_matches_is_case_insensitive_and_whole_word() {
+        let text = "Error: build failed\nWARNING: deprecated api\nWarn: low disk\nall good here";
+        assert_eq!(count_error_matches(text), 3);
+    }
+
+    #[test]
+    fn count_error_matches_ignores_substrings_that_are_not_whole_words() {
+        // "terrorize" and "forward" contain "error"/"warn" as substrings —
+        // the regex is word-bounded, so these must not count.
+        let text = "terrorize the forward warehouse";
+        assert_eq!(count_error_matches(text), 0);
+    }
+
+    #[test]
+    fn count_error_matches_returns_zero_for_clean_output() {
+        assert_eq!(
+            count_error_matches("vite dev server running\nready in 200ms"),
+            0
+        );
+    }
+
+    /// Not a process_manager unit test per se — it exercises the raw
+    /// `portable_pty` primitives the same way `start()`/`stop()` do, to pin
+    /// down the OS-level assumptions the rest of this module relies on:
+    /// `setsid()` makes the child its own process-group leader (so
+    /// `pid == pgid`), and `kill(-pid, SIGTERM)` reaches it. `start()` itself
+    /// isn't called directly here because it's wired to a concrete
+    /// `tauri::AppHandle` (events, tray refresh, managed state) that only a
+    /// running Tauri app provides.
+    #[test]
+    fn pty_spawn_reports_stdout_and_responds_to_process_group_kill() {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.arg("-c");
+        cmd.arg("echo pty-test-marker; sleep 30");
+
+        let mut child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+
+        let pid = child.process_id().expect("child must report a pid") as i32;
+
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut output = Vec::new();
+        let mut buf = [0u8; 256];
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !String::from_utf8_lossy(&output).contains("pty-test-marker")
+            && Instant::now() < deadline
+        {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => output.extend_from_slice(&buf[..n]),
+                Err(_) => break,
+            }
+        }
+        assert!(
+            String::from_utf8_lossy(&output).contains("pty-test-marker"),
+            "did not observe the child's stdout in time"
+        );
+
+        // portable-pty calls setsid() before exec, so the child leads its
+        // own process group — this is what makes `kill(-pid, ...)` in
+        // send_signal() reach the whole tree instead of just the shell.
+        let pgid = unsafe { libc::getpgid(pid) };
+        assert_eq!(pgid, pid, "child must be its own process group leader");
+
+        let result = unsafe { libc::kill(-pid, libc::SIGTERM) };
+        assert_eq!(result, 0, "kill(-pid, SIGTERM) must succeed");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(Some(_)) = child.try_wait() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "child did not exit after SIGTERM"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn pty_child_exit_status_reflects_a_nonzero_exit_code() {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.arg("-c");
+        cmd.arg("exit 7");
+
+        let mut child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        // Drop our copy of the reader so the PTY doesn't keep the exited
+        // child's slave fd referenced past its own lifetime.
+        let _ = pair.master.try_clone_reader().unwrap();
+
+        let status = child.wait().unwrap();
+        assert!(!status.success());
+        assert_eq!(status.exit_code(), 7);
+    }
+
+    #[test]
+    fn stdin_written_to_the_master_reaches_the_child() {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.arg("-c");
+        cmd.arg("read line; echo \"got:$line\"");
+
+        let mut child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+
+        let mut writer = pair.master.take_writer().unwrap();
+        writer.write_all(b"hello-from-test\n").unwrap();
+        drop(writer);
+
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut output = Vec::new();
+        let mut buf = [0u8; 256];
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !String::from_utf8_lossy(&output).contains("got:hello-from-test")
+            && Instant::now() < deadline
+        {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => output.extend_from_slice(&buf[..n]),
+                Err(_) => break,
+            }
+        }
+        assert!(String::from_utf8_lossy(&output).contains("got:hello-from-test"));
+
+        let _ = child.wait();
+    }
 }

@@ -112,3 +112,123 @@ pub fn kill_port_owner(port: u16) -> Result<(), AppError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::process::Child;
+    use std::time::Instant;
+
+    /// Kills the wrapped child on drop, so a failing assertion mid-test
+    /// can't leak a listening process into the rest of the test run.
+    struct KillOnDrop(Child);
+
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn free_port() -> u16 {
+        // Bind to port 0 to let the OS hand back an unused ephemeral port,
+        // then release it immediately — nothing ever connected, so there's
+        // no TIME_WAIT state to make it linger as "busy".
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if condition() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn spawn_listener(port: u16) -> KillOnDrop {
+        let child = Command::new("python3")
+            .args([
+                "-m",
+                "http.server",
+                &port.to_string(),
+                "--bind",
+                "127.0.0.1",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("failed to spawn python3 http.server for the test");
+        KillOnDrop(child)
+    }
+
+    #[test]
+    fn check_port_reports_free_for_an_unused_port() {
+        let port = free_port();
+        let result = check_port(port).unwrap();
+        assert!(result.free);
+        assert!(result.owner.is_none());
+    }
+
+    #[test]
+    fn check_port_reports_the_owner_of_a_listening_process() {
+        let port = free_port();
+        let guard = spawn_listener(port);
+
+        let became_busy = wait_until(Duration::from_secs(5), || {
+            check_port(port).map(|r| !r.free).unwrap_or(false)
+        });
+        assert!(
+            became_busy,
+            "listener never showed up as busy in check_port"
+        );
+
+        let result = check_port(port).unwrap();
+        assert!(!result.free);
+        let owner = result.owner.expect("busy port must report an owner");
+        assert_eq!(owner.pid, guard.0.id() as i32);
+    }
+
+    #[test]
+    fn kill_port_owner_frees_the_port_and_stops_the_process() {
+        let port = free_port();
+        let mut guard = spawn_listener(port);
+
+        wait_until(Duration::from_secs(5), || {
+            check_port(port).map(|r| !r.free).unwrap_or(false)
+        });
+
+        kill_port_owner(port).unwrap();
+
+        let became_free = wait_until(Duration::from_secs(5), || {
+            check_port(port).map(|r| r.free).unwrap_or(false)
+        });
+        assert!(
+            became_free,
+            "port was still reported busy after kill_port_owner"
+        );
+
+        let exited = wait_until(Duration::from_secs(2), || {
+            matches!(guard.0.try_wait(), Ok(Some(_)))
+        });
+        assert!(
+            exited,
+            "listening process was still alive after kill_port_owner"
+        );
+    }
+
+    #[test]
+    fn kill_port_owner_on_an_already_free_port_is_a_no_op() {
+        let port = free_port();
+        kill_port_owner(port).unwrap();
+    }
+}

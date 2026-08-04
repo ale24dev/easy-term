@@ -54,11 +54,18 @@ struct StoreData {
 
 pub struct ProjectStore {
     inner: Mutex<StoreData>,
+    path: PathBuf,
 }
 
 impl ProjectStore {
     pub fn load() -> Self {
-        let data = match read_from_disk() {
+        Self::load_from(store_path())
+    }
+
+    /// Split out from `load()` so tests can point the store at a tempdir
+    /// instead of the real `~/Library/Application Support/easy-term`.
+    fn load_from(path: PathBuf) -> Self {
+        let data = match read_from_disk(&path) {
             Ok(data) => data,
             Err(err) => {
                 err.emit();
@@ -67,6 +74,7 @@ impl ProjectStore {
         };
         Self {
             inner: Mutex::new(data),
+            path,
         }
     }
 
@@ -94,7 +102,7 @@ impl ProjectStore {
             Some(existing) => *existing = project.clone(),
             None => guard.projects.push(project.clone()),
         }
-        persist(&guard)?;
+        persist(&self.path, &guard)?;
         Ok(project)
     }
 
@@ -104,7 +112,7 @@ impl ProjectStore {
         for group in &mut guard.groups {
             group.project_ids.retain(|pid| pid != id);
         }
-        persist(&guard)
+        persist(&self.path, &guard)
     }
 
     pub fn list_groups(&self) -> Vec<Group> {
@@ -141,7 +149,7 @@ impl ProjectStore {
             project_ids: Vec::new(),
         };
         guard.groups.push(group.clone());
-        persist(&guard)?;
+        persist(&self.path, &guard)?;
         Ok(group)
     }
 
@@ -176,7 +184,7 @@ impl ProjectStore {
             }
         }
 
-        persist(&guard)
+        persist(&self.path, &guard)
     }
 
     /// Marks exactly the given projects as `wasRunning`, clearing the flag
@@ -186,7 +194,7 @@ impl ProjectStore {
         for project in &mut guard.projects {
             project.was_running = running_ids.contains(&project.id);
         }
-        persist(&guard)
+        persist(&self.path, &guard)
     }
 
     /// Returns the projects flagged `wasRunning` and immediately clears the
@@ -207,7 +215,7 @@ impl ProjectStore {
         for project in &mut guard.projects {
             project.was_running = false;
         }
-        persist(&guard)?;
+        persist(&self.path, &guard)?;
         Ok(restored)
     }
 }
@@ -221,13 +229,12 @@ fn store_path() -> PathBuf {
         .join("projects.json")
 }
 
-fn read_from_disk() -> Result<StoreData, AppError> {
-    let path = store_path();
+fn read_from_disk(path: &PathBuf) -> Result<StoreData, AppError> {
     if !path.exists() {
         return Ok(StoreData::default());
     }
 
-    let content = fs::read_to_string(&path).map_err(|e| {
+    let content = fs::read_to_string(path).map_err(|e| {
         AppError::new(
             MODULE,
             "STORE_READ_FAILED",
@@ -246,8 +253,7 @@ fn read_from_disk() -> Result<StoreData, AppError> {
 
 /// Atomic write: write to a temp file in the same directory, then rename —
 /// a crash mid-write can never leave `projects.json` truncated or corrupt.
-fn persist(data: &StoreData) -> Result<(), AppError> {
-    let path = store_path();
+fn persist(path: &PathBuf, data: &StoreData) -> Result<(), AppError> {
     let dir = path.parent().expect("store path always has a parent");
 
     fs::create_dir_all(dir).map_err(|e| {
@@ -275,11 +281,192 @@ fn persist(data: &StoreData) -> Result<(), AppError> {
         )
     })?;
 
-    fs::rename(&tmp_path, &path).map_err(|e| {
+    fs::rename(&tmp_path, path).map_err(|e| {
         AppError::new(
             MODULE,
             "STORE_WRITE_FAILED",
             format!("No se pudo confirmar la escritura de projects.json: {e}"),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn blank_project(name: &str) -> Project {
+        Project {
+            id: String::new(),
+            name: name.to_string(),
+            path: format!("/tmp/{name}"),
+            command: "pnpm run dev".to_string(),
+            port: None,
+            env: HashMap::new(),
+            auto_restart: false,
+            group_id: None,
+            was_running: false,
+        }
+    }
+
+    fn store_at(dir: &tempfile::TempDir) -> ProjectStore {
+        ProjectStore::load_from(dir.path().join("projects.json"))
+    }
+
+    #[test]
+    fn save_assigns_an_id_and_list_returns_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+
+        let saved = store.save(blank_project("api")).unwrap();
+        assert!(!saved.id.is_empty());
+
+        let listed = store.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, saved.id);
+        assert_eq!(listed[0].name, "api");
+    }
+
+    #[test]
+    fn save_with_existing_id_updates_in_place_instead_of_duplicating() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+
+        let saved = store.save(blank_project("api")).unwrap();
+        let mut edited = saved.clone();
+        edited.command = "pnpm run dev --port 4000".to_string();
+        store.save(edited).unwrap();
+
+        let listed = store.list();
+        assert_eq!(listed.len(), 1, "editing must not create a second project");
+        assert_eq!(listed[0].command, "pnpm run dev --port 4000");
+    }
+
+    #[test]
+    fn get_returns_none_for_unknown_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+        assert!(store.get("does-not-exist").is_none());
+    }
+
+    #[test]
+    fn delete_removes_the_project_and_its_group_membership() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+
+        let group = store.find_or_create_group("backend").unwrap();
+        let mut project = blank_project("api");
+        project.group_id = Some(group.id.clone());
+        let saved = store.save(project).unwrap();
+        store.sync_all_group_membership().unwrap();
+
+        assert!(store
+            .get_group(&group.id)
+            .unwrap()
+            .project_ids
+            .contains(&saved.id));
+
+        store.delete(&saved.id).unwrap();
+
+        assert!(store.get(&saved.id).is_none());
+        assert!(!store
+            .get_group(&group.id)
+            .unwrap()
+            .project_ids
+            .contains(&saved.id));
+    }
+
+    #[test]
+    fn persistence_survives_a_reload_from_the_same_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.json");
+
+        let saved_id = {
+            let store = ProjectStore::load_from(path.clone());
+            store.save(blank_project("api")).unwrap().id
+        };
+
+        let reloaded = ProjectStore::load_from(path);
+        let listed = reloaded.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, saved_id);
+    }
+
+    #[test]
+    fn a_corrupt_store_file_loads_as_empty_instead_of_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.json");
+        fs::write(&path, "{ this is not valid json").unwrap();
+
+        let store = ProjectStore::load_from(path);
+        assert!(store.list().is_empty());
+        assert!(store.list_groups().is_empty());
+    }
+
+    #[test]
+    fn find_or_create_group_is_case_insensitive_and_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+
+        let first = store.find_or_create_group("Backend").unwrap();
+        let second = store.find_or_create_group("backend").unwrap();
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(store.list_groups().len(), 1);
+    }
+
+    #[test]
+    fn sync_all_group_membership_follows_a_project_moving_between_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+
+        let backend = store.find_or_create_group("backend").unwrap();
+        let frontend = store.find_or_create_group("frontend").unwrap();
+
+        let mut project = blank_project("api");
+        project.group_id = Some(backend.id.clone());
+        let saved = store.save(project).unwrap();
+        store.sync_all_group_membership().unwrap();
+
+        assert!(store
+            .get_group(&backend.id)
+            .unwrap()
+            .project_ids
+            .contains(&saved.id));
+
+        let mut moved = saved.clone();
+        moved.group_id = Some(frontend.id.clone());
+        store.save(moved).unwrap();
+        store.sync_all_group_membership().unwrap();
+
+        assert!(!store
+            .get_group(&backend.id)
+            .unwrap()
+            .project_ids
+            .contains(&saved.id));
+        assert!(store
+            .get_group(&frontend.id)
+            .unwrap()
+            .project_ids
+            .contains(&saved.id));
+    }
+
+    #[test]
+    fn take_was_running_returns_exactly_the_flagged_projects_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+
+        let a = store.save(blank_project("a")).unwrap();
+        let b = store.save(blank_project("b")).unwrap();
+        store.save(blank_project("c")).unwrap();
+
+        let running: HashSet<String> = [a.id.clone(), b.id.clone()].into_iter().collect();
+        store.set_was_running(&running).unwrap();
+
+        let restored = store.take_was_running().unwrap();
+        let restored_ids: HashSet<String> = restored.iter().map(|p| p.id.clone()).collect();
+        assert_eq!(restored_ids, running);
+
+        // Consumed: a second call must come back empty.
+        assert!(store.take_was_running().unwrap().is_empty());
+    }
 }

@@ -33,3 +33,5 @@ tauri-plugin-notification = "2.3.3"
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-autostart = "2.5.1"
 
+[dev-dependencies]
+tempfile = "3"
