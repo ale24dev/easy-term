@@ -166,6 +166,10 @@ El objetivo: *usarla a diario reemplaza al menos una terminal*.
 - [ ] **1.6 Lista de proyectos**: estado con dot de color, botones start/stop/restart,
       click → ver logs.
 - [ ] **1.7 Estados y exits**: distinguir exit limpio vs crash; badge "crashed".
+- [ ] **1.8 `error_logger` (base)**: tipo `AppError` con códigos, writer JSONL con canal
+      mpsc, panic hook, rotación/retención, captura global en frontend + comando
+      `log_app_error` (ver sección 7). Se monta desde el principio para que el resto
+      del desarrollo ya se beneficie de él.
 
 **Criterio de salida:** agrego mi proyecto, `pnpm run dev` corre con colores, veo logs,
 paro y no quedan zombis (`lsof -i :PUERTO` limpio).
@@ -189,6 +193,9 @@ paro y no quedan zombis (`lsof -i :PUERTO` limpio).
       notificación → abre el popover en los logs de ese proyecto.
 - [ ] **2.7 Highlight de errores**: contador de líneas `error|warn` (regex sobre el stream)
       → badge numérico por proyecto, se resetea al ver los logs.
+- [ ] **2.8 Diagnóstico — dedupe y visor**: anti-tormenta de errores repetidos, panel
+      Settings → Diagnóstico con visor de eventos, "Abrir carpeta de logs" y "Copiar
+      último error" (ver 7.6).
 
 **Criterio de salida:** configurar un proyecto nuevo son 2 clicks; un puerto ocupado se
 resuelve desde la app; me entero de un crash sin mirar la app.
@@ -244,7 +251,8 @@ easy-term/
 │   │   ├── project_store.rs    # CRUD + persistencia JSON
 │   │   ├── port_checker.rs
 │   │   ├── script_detector.rs
-│   │   └── env_resolver.rs
+│   │   ├── env_resolver.rs
+│   │   └── error_logger.rs     # AppError, writer JSONL, panic hook, rotación
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── PLAN.md                     # este documento
@@ -253,7 +261,121 @@ easy-term/
 
 ---
 
-## 7. Riesgos y mitigaciones
+## 7. Diagnóstico interno: registro de errores de la app
+
+La app registra **sus propios errores** (no los de los proyectos del usuario) en logs
+estructurados JSON, para poder diagnosticar y corregir fallos a posteriori sin depender
+de que el usuario reproduzca el problema.
+
+### 7.1 Formato y ubicación
+
+- **Formato: JSONL** (un objeto JSON por línea, append-only). Más robusto que un array JSON:
+  una línea corrupta no invalida el archivo, el append es atómico a nivel de línea y se
+  procesa con streaming.
+- **Ubicación:** `~/Library/Logs/easy-term/errors-YYYY-MM-DD.jsonl` (la convención de macOS
+  para logs de apps; visible en Console.app).
+- **Rotación:** un archivo por día; retención de 14 días + límite global de 20 MB
+  (se borra lo más antiguo primero). Limpieza al arrancar la app.
+
+### 7.2 Esquema del evento de error
+
+```jsonc
+{
+  "ts": "2026-08-04T14:32:11.482Z",     // ISO 8601 UTC
+  "level": "error",                      // "warn" | "error" | "fatal"
+  "source": "backend",                   // "backend" | "frontend"
+  "module": "process_manager",           // módulo que originó el error
+  "code": "PTY_SPAWN_FAILED",            // código estable de la taxonomía (ver 7.3)
+  "message": "Failed to spawn PTY: No such file or directory",
+  "context": {                           // datos específicos del error (best-effort)
+    "projectId": "a1b2c3",
+    "command": "pnpm run dev",
+    "os_error": 2
+  },
+  "stack": "...",                        // stacktrace si existe (Rust backtrace o JS stack)
+  "session": "f47ac10b",                 // id aleatorio por arranque de la app (agrupa errores de una sesión)
+  "appVersion": "0.1.0",
+  "osVersion": "macOS 15.2"
+}
+```
+
+**Privacidad:** los logs son locales, nunca se envían a ningún sitio. Aun así, en `context`
+se registran rutas de proyecto tal cual (es la máquina del usuario), pero **nunca** valores
+de variables de entorno — solo sus nombres.
+
+### 7.3 Taxonomía de códigos de error
+
+Códigos estables (enum en Rust + union type en TS) para poder agrupar y buscar. Familias:
+
+| Familia | Ejemplos | Módulo típico |
+|---|---|---|
+| `PTY_*` | `PTY_SPAWN_FAILED`, `PTY_RESIZE_FAILED`, `PTY_READ_ERROR` | `process_manager` |
+| `PROC_*` | `PROC_KILL_FAILED`, `PROC_GROUP_ORPHANED`, `PROC_UNEXPECTED_EXIT` | `process_manager` |
+| `STORE_*` | `STORE_READ_FAILED`, `STORE_WRITE_FAILED`, `STORE_PARSE_ERROR`, `STORE_MIGRATION_FAILED` | `project_store` |
+| `ENV_*` | `ENV_SHELL_RESOLVE_FAILED`, `ENV_PATH_EMPTY` | `env_resolver` |
+| `PORT_*` | `PORT_CHECK_FAILED`, `PORT_KILL_OWNER_FAILED` | `port_checker` |
+| `DETECT_*` | `DETECT_PKG_JSON_INVALID`, `DETECT_IO_ERROR` | `script_detector` |
+| `IPC_*` | `IPC_COMMAND_PANIC`, `IPC_EVENT_EMIT_FAILED` | `commands` |
+| `UI_*` | `UI_UNHANDLED_ERROR`, `UI_UNHANDLED_REJECTION`, `UI_XTERM_ERROR`, `UI_RENDER_ERROR` | frontend |
+| `TRAY_*` | `TRAY_UPDATE_FAILED`, `TRAY_POSITION_FAILED` | `tray` |
+
+### 7.4 Arquitectura de captura
+
+```
+Frontend                                Backend (Rust)
+────────                                ──────────────
+window.onerror ──────┐
+unhandledrejection ──┤                  error_logger (módulo central)
+ErrorBoundary React ─┼─ invoke ───────▶  ├─ canal mpsc → writer thread único
+try/catch en ipc.ts ─┘  log_app_error    ├─ serializa a JSONL + append
+                                         ├─ rotación/retención
+Rust: panic hook ───────────────────────▶├─ dedupe: mismo (code+message) > 10/min
+Rust: Result<_, AppError> en comandos ──▶│         se colapsa en un evento "repeated"
+tracing::error! (opcional, puente) ─────▶└─ fallback: eprintln! si el disco falla
+```
+
+Puntos de captura:
+
+1. **Backend — tipo `AppError` central**: todos los comandos Tauri devuelven
+   `Result<T, AppError>`; `AppError` porta `code`, `message`, `context` y se loguea
+   automáticamente en el punto de conversión (impl de `From`/middleware), no en cada
+   call-site. Así ningún error de comando escapa sin registrarse.
+2. **Backend — panic hook**: `std::panic::set_hook` captura panics con backtrace
+   (`level: "fatal"`) y hace flush antes de morir.
+3. **Frontend — captura global**: `window.onerror` + `window.onunhandledrejection` +
+   un `ErrorBoundary` de React envían al comando `log_app_error`. El wrapper `ipc.ts`
+   también loguea todo `invoke` rechazado (con el nombre del comando en `context`).
+4. **Writer único con canal**: los productores no tocan el disco; empujan a un canal
+   `mpsc` y un thread dedicado escribe. Sin locks en el hot path, sin bloquear la UI,
+   y el orden de eventos queda serializado.
+5. **Anti-tormenta**: dedupe por `(code, message)` con ventana de 1 min (a partir de 10
+   repeticiones se emite un solo evento con `"repeats": N`). Evita que un error en loop
+   (p. ej. `PTY_READ_ERROR` por segundo) queme disco.
+
+### 7.5 Comandos Tauri adicionales
+
+| Comando | Firma | Descripción |
+|---|---|---|
+| `log_app_error` | `(FrontendError) -> ()` | Punto de entrada de errores del frontend |
+| `read_error_log` | `(day?, limit?) -> Vec<ErrorEvent>` | Lee eventos para el visor interno |
+| `open_logs_folder` | `() -> ()` | Abre `~/Library/Logs/easy-term/` en Finder |
+
+### 7.6 UI mínima (Settings → Diagnóstico)
+
+- Contador de errores de la sesión actual; si > 0, dot discreto en Settings.
+- Visor simple: tabla de eventos (hora, code, message) con filtro por nivel; click →
+  JSON completo expandido.
+- Botones: "Abrir carpeta de logs" y "Copiar último error" (para pegarlo en un issue).
+
+### 7.7 Futuro (fuera de v1)
+
+- Botón "Reportar" que pre-rellena un issue de GitHub con el JSON del error.
+- Envío opt-in de crash reports (nunca por defecto).
+- Puente `tracing` → error_logger para correlacionar errores con logs de debug.
+
+---
+
+## 8. Riesgos y mitigaciones
 
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
@@ -265,7 +387,7 @@ easy-term/
 
 ---
 
-## 8. Definición de éxito de la v1
+## 9. Definición de éxito de la v1
 
 Al final de la Fase 2, la app debe pasar esta prueba de fuego:
 
