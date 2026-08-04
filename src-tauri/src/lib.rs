@@ -15,6 +15,7 @@ use process_manager::{ProcessManager, ProjectStatus};
 use project_store::ProjectStore;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, Runtime, WebviewWindow, WindowEvent,
@@ -33,6 +34,12 @@ use tauri_plugin_positioner::{Position, WindowExt};
 /// `end_native_dialog` commands (see `commands.rs`) to suppress that.
 pub(crate) struct SuppressAutoHide(pub AtomicBool);
 
+/// How long to ignore blur-triggered auto-hide right after showing the
+/// popover. Covers a transient focus-loss/refocus while AppKit settles the
+/// window onto a full-screen Space (see `toggle_popover`'s comment) without
+/// meaningfully delaying the normal click-away-to-dismiss behavior.
+const POST_SHOW_BLUR_GRACE: Duration = Duration::from_millis(700);
+
 fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
     if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
@@ -44,15 +51,33 @@ fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
         #[cfg(target_os = "macos")]
         macos_window::allow_join_fullscreen_space(window);
 
+        // Reported symptom: with another app full screen, clicking the tray
+        // makes the *other* app's screen flicker "like it briefly gets focus
+        // and loses it" — consistent with our own window winning focus for
+        // an instant while AppKit is still settling it onto that Space,
+        // immediately losing it again, and the hide-on-blur handler below
+        // reacting to that spurious blur by hiding the window right back
+        // before it's ever seen. Suppress hide-on-blur for a beat so that
+        // settling isn't mistaken for the user clicking away.
+        let suppress = window.state::<SuppressAutoHide>();
+        suppress.0.store(true, Ordering::SeqCst);
+        let clear_suppress = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(POST_SHOW_BLUR_GRACE);
+            clear_suppress
+                .state::<SuppressAutoHide>()
+                .0
+                .store(false, Ordering::SeqCst);
+        });
+
         let _ = window.move_window_constrained(Position::TrayCenter);
         let _ = window.show();
         let _ = window.set_focus();
 
-        // Diagnostic snapshot, not a fix: the fullscreen-space fix above
-        // still reportedly has no visible effect at all. Writes to the same
-        // log Settings → Diagnóstico already shows, so the next repro
-        // produces real AppKit state instead of a yes/no. Safe to leave in
-        // — cheap, and only fires on every popover open.
+        // Diagnostic snapshot: dumps the window's actual AppKit state right
+        // after show() into the same log Settings → Diagnóstico shows, so a
+        // repro produces real facts instead of a yes/no. Safe to leave in —
+        // cheap, fires on every popover open.
         #[cfg(target_os = "macos")]
         macos_window::log_window_diagnostics(window);
     }
@@ -143,7 +168,26 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let WindowEvent::Focused(false) = event {
                         let suppress = app_handle.state::<SuppressAutoHide>();
-                        if !suppress.0.load(Ordering::SeqCst) {
+                        if suppress.0.load(Ordering::SeqCst) {
+                            error_logger::log_error(
+                                error_logger::Level::Warn,
+                                error_logger::Source::Backend,
+                                "lib",
+                                "BLUR_SUPPRESSED",
+                                "Focused(false) fired but was suppressed (dialog open or just shown)",
+                                None,
+                                None,
+                            );
+                        } else {
+                            error_logger::log_error(
+                                error_logger::Level::Warn,
+                                error_logger::Source::Backend,
+                                "lib",
+                                "BLUR_HID_WINDOW",
+                                "Focused(false) fired and hid the window",
+                                None,
+                                None,
+                            );
                             let _ = hide_on_blur.hide();
                         }
                     }

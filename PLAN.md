@@ -484,6 +484,34 @@ puede diagnosticar con precisión en vez de seguir adivinando — sea que el pro
 `tauri-plugin-positioner` (la ventana se mueve fuera de pantalla), o en algo completamente
 distinto que ninguna de las dos hipótesis anteriores contempló.
 
+**Cuarto seguimiento: nueva pista concreta del usuario antes de correr el diagnóstico.**
+Describió el síntoma con más precisión: "a veces, cuando no abre, al clickear la pantalla de
+la app activa parpadea, como si se hiciera focus y se quitara". Eso apunta a un mecanismo
+puntual: el handler de `Focused(false)` en `setup()` (agregado hace varias fases para que el
+popover se comporte como uno nativo — oculta la ventana al perder foco) probablemente está
+reaccionando a una pérdida de foco *espuria*. La hipótesis: `show()` + `set_focus()` sí le dan
+foco a la ventana por una fracción de segundo mientras AppKit todavía está acomodándola en la
+Space de la app en pantalla completa; ese foco se pierde casi al instante (la ventana no logra
+mantenerse "key" ahí), dispara `Focused(false)`, y el handler la oculta de nuevo antes de que
+el usuario llegue a verla — el parpadeo reportado es exactamente esa transición de
+foco-ganado-y-perdido. Esto además explicaría por qué a veces "no hace nada en absoluto": si
+la transición es más rápida, el parpadeo no llega a percibirse.
+
+Se agregaron dos cosas:
+- **Un fix dirigido**: `toggle_popover` ahora activa `SuppressAutoHide` (el mismo flag que ya
+  existía para el picker de carpeta) justo antes de `show()`/`set_focus()`, y lo libera solo
+  después de 700ms en un hilo aparte — así un blur espurio durante el acomodo en la Space no
+  se confunde con el usuario clickeando fuera del popover.
+- **Logging en el handler de blur mismo** (no específico de macOS, corre en cualquier
+  plataforma): cada `Focused(false)` ahora escribe `BLUR_SUPPRESSED` o `BLUR_HID_WINDOW` al
+  mismo log de diagnóstico — esto confirma o refuta la hipótesis directamente, incluso si el
+  fix de 700ms no alcanza a resolverlo del todo.
+
+A diferencia de los cambios anteriores, la parte de logging en el handler de blur **no** está
+detrás de `cfg(target_os = "macos")` — corre en cualquier plataforma, así que esta vez sí pasó
+por un `cargo check`/`clippy`/`build` real en este sandbox Linux (los cambios específicos de
+AppKit en `macos_window.rs` siguen sin poder compilarse acá, misma limitación de siempre).
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.
