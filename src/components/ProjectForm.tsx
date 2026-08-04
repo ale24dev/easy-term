@@ -1,7 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { PlusIcon, XIcon } from "lucide-react";
 import { useProjectsStore } from "../stores/projects";
 import { ipc, type DetectedScript, type Project } from "../lib/ipc";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Switch } from "./ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 const DEFAULT_COMMAND = "pnpm run dev";
 
@@ -142,66 +148,80 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
   }
 
   return (
-    <form className="project-form" onSubmit={handleSubmit}>
-      <label className="field">
-        <span>Ruta del proyecto</span>
-        <div className="path-picker">
-          <input value={path} readOnly placeholder="Elige una carpeta…" />
-          <button type="button" onClick={handlePickFolder}>
+    <form
+      className="scrollbar-thin flex flex-1 flex-col gap-3.5 overflow-y-auto p-3.5"
+      onSubmit={handleSubmit}
+    >
+      <div className="flex flex-col gap-1">
+        <Label>Ruta del proyecto</Label>
+        <div className="flex gap-1.5">
+          <Input value={path} readOnly placeholder="Elige una carpeta…" />
+          <Button type="button" variant="outline" size="sm" onClick={handlePickFolder}>
             Elegir…
-          </button>
+          </Button>
         </div>
-      </label>
+      </div>
 
-      <label className="field">
-        <span>Nombre</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="mi-proyecto" />
-      </label>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="project-name">Nombre</Label>
+        <Input
+          id="project-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="mi-proyecto"
+        />
+      </div>
 
-      <label className="field">
-        <span>Comando</span>
-        <input
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="project-command">Comando</Label>
+        <Input
+          id="project-command"
+          className="font-mono"
           value={command}
           onChange={(e) => setCommand(e.target.value)}
           placeholder="pnpm run dev"
         />
-      </label>
+      </div>
 
       {scripts.length > 0 && (
-        <label className="field">
-          <span>Scripts detectados</span>
-          <select
-            value={scripts.find((s) => s.command === command)?.name ?? ""}
-            onChange={(e) => {
-              const script = scripts.find((s) => s.name === e.target.value);
+        <div className="flex flex-col gap-1">
+          <Label>Scripts detectados</Label>
+          <Select
+            value={scripts.find((s) => s.command === command)?.name ?? undefined}
+            onValueChange={(value) => {
+              const script = scripts.find((s) => s.name === value);
               if (script) setCommand(script.command);
             }}
           >
-            <option value="" disabled>
-              Elegir un script…
-            </option>
-            {scripts.map((script) => (
-              <option key={script.name} value={script.name}>
-                {script.name} — {script.command}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger>
+              <SelectValue placeholder="Elegir un script…" />
+            </SelectTrigger>
+            <SelectContent>
+              {scripts.map((script) => (
+                <SelectItem key={script.name} value={script.name}>
+                  {script.name} — {script.command}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
 
-      <label className="field">
-        <span>Puerto (opcional)</span>
-        <input
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="project-port">Puerto (opcional)</Label>
+        <Input
+          id="project-port"
           value={port}
           onChange={(e) => setPort(e.target.value)}
           placeholder="3000"
           inputMode="numeric"
         />
-      </label>
+      </div>
 
-      <label className="field">
-        <span>Grupo (opcional)</span>
-        <input
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="project-group">Grupo (opcional)</Label>
+        <Input
+          id="project-group"
           value={groupName}
           onChange={(e) => setGroupName(e.target.value)}
           placeholder="backend"
@@ -212,52 +232,65 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
             <option key={group.id} value={group.name} />
           ))}
         </datalist>
-      </label>
+      </div>
 
-      <label className="checkbox-field">
-        <input
-          type="checkbox"
-          checked={autoRestart}
-          onChange={(e) => setAutoRestart(e.target.checked)}
-        />
-        <span>Reiniciar automáticamente si crashea</span>
-      </label>
+      <div className="flex items-center gap-2">
+        <Switch id="auto-restart" checked={autoRestart} onCheckedChange={setAutoRestart} />
+        <Label htmlFor="auto-restart" className="text-foreground">
+          Reiniciar automáticamente si crashea
+        </Label>
+      </div>
 
-      <div className="field">
-        <span>Variables de entorno</span>
-        <div className="env-rows">
+      <div className="flex flex-col gap-1.5">
+        <Label>Variables de entorno</Label>
+        <div className="flex flex-col gap-1.5">
           {envRows.map((row, index) => (
-            <div className="env-row" key={index}>
-              <input
+            <div className="flex items-center gap-1.5" key={index}>
+              <Input
                 value={row.key}
                 onChange={(e) => updateEnvRow(index, "key", e.target.value)}
                 placeholder="CLAVE"
+                className="font-mono"
               />
-              <input
+              <Input
                 value={row.value}
                 onChange={(e) => updateEnvRow(index, "value", e.target.value)}
                 placeholder="valor"
+                className="font-mono"
               />
-              <button type="button" className="icon-button" onClick={() => removeEnvRow(index)}>
-                ✕
-              </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => removeEnvRow(index)}
+              >
+                <XIcon />
+              </Button>
             </div>
           ))}
-          <button type="button" className="add-env" onClick={addEnvRow}>
-            + Agregar variable
-          </button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="self-start text-muted-foreground"
+            onClick={addEnvRow}
+          >
+            <PlusIcon />
+            Agregar variable
+          </Button>
         </div>
       </div>
 
-      {error && <p className="form-error">{error}</p>}
+      {error && <p className="text-[12px] text-destructive">{error}</p>}
 
-      <div className="form-actions">
-        <button type="button" onClick={onCancel} disabled={saving}>
+      <div className="mt-auto flex justify-end gap-2 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
           Cancelar
-        </button>
-        <button type="submit" className="primary" disabled={saving}>
+        </Button>
+        <Button type="submit" disabled={saving}>
           {saving ? "Guardando…" : "Guardar"}
-        </button>
+        </Button>
       </div>
     </form>
   );

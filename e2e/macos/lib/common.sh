@@ -109,7 +109,7 @@ click_button() {
 # tooltip (e.g. `<button title="Iniciar">▶</button>`) — WebKit accessibility
 # usually maps that to AXHelp rather than the button's AXTitle/name (which
 # comes from the emoji text content instead). Matching on name OR help OR
-# description covers plain-text buttons ("+ Proyecto", "Salir de easy-term")
+# description covers plain-text buttons ("Proyecto", "Salir de easy-term")
 # and title-only icon buttons ("Iniciar", "Detener", ...) with one helper,
 # without needing to know in advance which attribute WebKit picked.
 click_by_accessible_text() {
@@ -150,8 +150,9 @@ close_open_folder_picker() {
 # Replaces a labeled text field's value via a real focus + select-all +
 # keystroke sequence — this goes through actual DOM input events, unlike
 # setting the accessibility value directly, so React's onChange sees it.
-# Relies on implicit <label>text<input/></label> wrapping exposing "text"
-# as the field's accessible name, which ProjectForm.tsx uses throughout.
+# Relies on <Label htmlFor="…"><Input id="…"/> association exposing the
+# label text as the field's accessible name, which ProjectForm.tsx uses
+# throughout.
 set_text_field_value() {
   local label="$1" value="$2"
   osa "tell application \"System Events\" to tell process \"$APP_NAME\"

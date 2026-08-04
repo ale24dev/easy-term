@@ -21,7 +21,7 @@ flow_main() {
     }
   fi
 
-  click_by_accessible_text "+ Proyecto"
+  click_by_accessible_text "Proyecto"
   wait_until 3 'element_with_text_exists "Elegir…"' || {
     fail "new-project form did not open"
     return

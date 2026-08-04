@@ -1,4 +1,13 @@
 import type { PortOwner } from "../lib/ipc";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
 
 interface PortConflictDialogProps {
   port: number;
@@ -16,21 +25,24 @@ export function PortConflictDialog({
   onFreeAndStart,
 }: PortConflictDialogProps) {
   return (
-    <div className="dialog-backdrop" onClick={onCancel}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <p className="dialog-title">Puerto {port} ocupado</p>
-        <p className="dialog-body">
-          <strong>{owner.name}</strong> (pid {owner.pid}) ya está escuchando en este puerto.
-        </p>
-        <div className="dialog-actions">
-          <button type="button" onClick={onCancel} disabled={busy}>
+    <Dialog open onOpenChange={(open) => !open && !busy && onCancel()}>
+      <DialogContent showClose={!busy}>
+        <DialogHeader>
+          <DialogTitle>Puerto {port} ocupado</DialogTitle>
+          <DialogDescription>
+            <strong className="text-foreground">{owner.name}</strong> (pid {owner.pid}) ya está
+            escuchando en este puerto.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
             Cancelar
-          </button>
-          <button type="button" className="primary" onClick={onFreeAndStart} disabled={busy}>
+          </Button>
+          <Button type="button" onClick={onFreeAndStart} disabled={busy}>
             {busy ? "Liberando…" : "Liberar y continuar"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

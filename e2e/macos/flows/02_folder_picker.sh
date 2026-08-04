@@ -19,7 +19,7 @@ flow_main() {
     }
   fi
 
-  click_by_accessible_text "+ Proyecto"
+  click_by_accessible_text "Proyecto"
   if ! wait_until 3 'element_with_text_exists "Elegir…"'; then
     fail "new-project form did not open (missing the 'Elegir…' button)"
     return

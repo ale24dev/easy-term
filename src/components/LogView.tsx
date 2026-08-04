@@ -1,8 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import {
+  ArrowDownIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ClipboardIcon,
+  FolderIcon,
+  GlobeIcon,
+  MonitorIcon,
+  XIcon,
+} from "lucide-react";
 import { getTerminal, hydrateFromBuffer } from "../lib/terminals";
 import { ipc } from "../lib/ipc";
 import { useProjectsStore } from "../stores/projects";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { IconTooltip } from "./ui/tooltip";
 
 interface LogViewProps {
   projectId: string;
@@ -121,10 +134,10 @@ export function LogView({ projectId }: LogViewProps) {
   }
 
   return (
-    <div className="log-view">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       {searchOpen && (
-        <div className="log-search-bar">
-          <input
+        <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+          <Input
             ref={searchInputRef}
             value={searchTerm}
             onChange={(e) => {
@@ -139,49 +152,76 @@ export function LogView({ projectId }: LogViewProps) {
             }}
             placeholder="Buscar en el log…"
           />
-          <button type="button" onClick={() => runSearch(searchTerm, true)}>
-            ↑
-          </button>
-          <button type="button" onClick={() => runSearch(searchTerm, false)}>
-            ↓
-          </button>
-          <button type="button" onClick={closeSearch}>
-            ✕
-          </button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => runSearch(searchTerm, true)}
+          >
+            <ChevronUpIcon />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => runSearch(searchTerm, false)}
+          >
+            <ChevronDownIcon />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" onClick={closeSearch}>
+            <XIcon />
+          </Button>
         </div>
       )}
 
-      <div ref={hostRef} className="log-view-host" />
+      <div ref={hostRef} className="min-h-0 flex-1 px-2 py-1" />
 
-      <div className="log-view-toolbar">
+      <div className="flex shrink-0 items-center gap-1.5 px-2 pt-1 pb-2">
         {openableUrl && (
-          <button className="open-url-button" onClick={() => openUrl(openableUrl)}>
-            🌐 Abrir {openableUrl}
-          </button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-w-0 flex-1 justify-start truncate text-muted-foreground"
+            onClick={() => openUrl(openableUrl)}
+          >
+            <GlobeIcon className="shrink-0" />
+            <span className="truncate">Abrir {openableUrl}</span>
+          </Button>
         )}
-        <div className="quick-actions">
+        <div className="flex shrink-0 items-center gap-0.5">
           {project && (
             <>
-              <button title="Abrir en el editor" onClick={() => ipc.openInEditor(project.path)}>
-                🖥
-              </button>
-              <button title="Abrir en Finder" onClick={() => revealItemInDir(project.path)}>
-                📁
-              </button>
+              <IconTooltip label="Abrir en el editor">
+                <Button variant="ghost" size="icon" onClick={() => ipc.openInEditor(project.path)}>
+                  <MonitorIcon />
+                </Button>
+              </IconTooltip>
+              <IconTooltip label="Abrir en Finder">
+                <Button variant="ghost" size="icon" onClick={() => revealItemInDir(project.path)}>
+                  <FolderIcon />
+                </Button>
+              </IconTooltip>
             </>
           )}
           {openableUrl && (
-            <button title="Copiar URL" onClick={copyUrl}>
-              📋
-            </button>
+            <IconTooltip label="Copiar URL">
+              <Button variant="ghost" size="icon" onClick={copyUrl}>
+                <ClipboardIcon />
+              </Button>
+            </IconTooltip>
           )}
         </div>
       </div>
 
       {!atBottom && (
-        <button className="follow-button" onClick={scrollToBottom}>
-          ↓ Seguir
-        </button>
+        <Button
+          size="sm"
+          className="absolute right-5 bottom-11 rounded-full bg-foreground text-background shadow-md hover:bg-foreground/90"
+          onClick={scrollToBottom}
+        >
+          <ArrowDownIcon />
+          Seguir
+        </Button>
       )}
     </div>
   );

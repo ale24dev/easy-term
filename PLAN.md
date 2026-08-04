@@ -336,6 +336,61 @@ ajusten los que no), sacar el `continue-on-error` para que sí bloquee. `check` 
 clippy-equivalente, `cargo test`, `pnpm test`) sí es bloqueante desde ya — esa capa se corrió
 y se verificó en este sandbox.
 
+### Fase 3.8 — Rediseño de UI (Tailwind + shadcn/ui)
+
+Pedido explícito de rediseñar toda la UI guiándose por [tauri-ui](https://github.com/agmmnn/tauri-ui)
+(agmmnn), un scaffolder que combina Tauri con shadcn/ui (Radix UI + Tailwind + theming
+claro/oscuro). tauri-ui en sí es un generador de proyectos Next.js/Vite nuevos, no algo
+"instalable" dentro de una app ya existente — se tradujo el patrón (Tailwind + primitivas
+Radix con la API de shadcn/ui + theming por variables CSS) a mano sobre el Vite+React ya
+existente:
+
+- [x] **Tailwind v4** (`@tailwindcss/vite`, CSS-first: `@theme inline` en `App.css`, sin
+      `tailwind.config.js`) + alias `@/*` → `src/*` en `vite.config.ts`, `vitest.config.ts` y
+      `tsconfig.json`.
+- [x] **Primitivas al estilo shadcn/ui escritas a mano** (`src/components/ui/`): Button (cva,
+      variants default/destructive/outline/secondary/ghost/link), Input, Label, Switch, Badge,
+      Dialog, Select, Tooltip — sobre los primitivos de Radix UI (`@radix-ui/react-*`) más
+      `class-variance-authority`/`clsx`/`tailwind-merge`/`lucide-react`. **El CLI de shadcn no
+      se pudo usar**: su flujo `init`/`add` actual depende de una llamada de red a
+      `ui.shadcn.com` para resolver el registry, y ese host está bloqueado por la política de
+      red de este entorno (403 confirmado contra el proxy) — se instalaron los mismos paquetes
+      Radix que el CLI habría instalado y se escribieron los componentes a mano siguiendo la
+      API pública de shadcn/ui (mismos nombres de props/variantes), así que son
+      intercambiables con los del CLI si se corre en un entorno sin esa restricción más
+      adelante.
+- [x] **Tokens de diseño** en `App.css`: paleta neutral de shadcn en OKLCH (`--background`,
+      `--foreground`, `--card`, `--primary`, `--border`, `--radius`, etc.) para claro y oscuro,
+      más tokens propios `--status-running/starting/crashed/stopped` (constantes entre temas:
+      son señales de estado, no acentos decorativos).
+      `@custom-variant dark (&:is(.dark *))` en vez de la estrategia por defecto de Tailwind
+      (`prefers-color-scheme`), para poder tener "claro"/"oscuro"/"sistema" como opciones
+      explícitas.
+- [x] **`theme-provider.tsx`**: persiste la elección en `localStorage`, sigue
+      `prefers-color-scheme` en vivo cuando el modo es "sistema", y aplica la clase `.dark`
+      sincrónicamente en `main.tsx` antes del primer render (sin esperar al efecto) para evitar
+      un flash del tema incorrecto. Toggle de tres estados (☀️/🌙/🖥️) en Settings.
+- [x] **Los cinco componentes reescritos** sobre las primitivas nuevas: `App.tsx` (header con
+      iconos de lucide-react en vez de glifos de texto), `ProjectList.tsx` (acciones que
+      aparecen al hacer hover sobre la fila, badges para puerto/errores/reintentos),
+      `ProjectForm.tsx` (Select de Radix para scripts detectados, Switch para auto-restart),
+      `Settings.tsx` (toggle de tema, badges de nivel en diagnóstico), `PortConflictDialog.tsx`
+      (Dialog de Radix con foco atrapado en vez del backdrop/modal hecho a mano). `App.css`
+      quedó reducido a la configuración de Tailwind/tokens más lo genuinamente bespoke
+      (`.terminal-host` para xterm.js, `.scrollbar-thin`).
+
+**Cambio de texto accesible que afecta a `e2e/macos`**: el botón "+ Proyecto" pasó a tener un
+ícono real (`PlusIcon`) en vez del carácter "+" como texto, así que su nombre accesible pasó
+de "+ Proyecto" a "Proyecto" — se actualizaron los flujos `02_folder_picker.sh` y
+`03_project_crud.sh` para que sigan apuntando al botón correcto. El resto de los selectores
+(`Salir de easy-term`, `Elegir…`, labels de campos) no cambiaron de texto.
+
+Verificado visualmente en Linux (Xvfb + xdotool): tema claro, tema oscuro (incluyendo el
+tooltip de Radix confirmando que el toggle funciona), formulario completo con Switch/Select/
+Input, picker de carpeta nativo (GTK) sin regresión, fila de proyecto con badge de estado y
+acciones reveal-on-hover, crear/eliminar un proyecto de punta a punta. `cargo test` (41),
+`pnpm test` (16) y `pnpm build` (incluye `tsc`) siguen en verde.
+
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
       del dev server ("port in use, use 3001? y/n"). Con el PTY ya montado es casi gratis.

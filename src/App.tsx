@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ChevronLeftIcon, PlusIcon, SlidersHorizontalIcon } from "lucide-react";
 import "./App.css";
 import { ProjectList } from "./components/ProjectList";
 import { ProjectForm } from "./components/ProjectForm";
 import { LogView } from "./components/LogView";
 import { Settings } from "./components/Settings";
+import { Button } from "./components/ui/button";
+import { IconTooltip } from "./components/ui/tooltip";
 import { installGlobalErrorHandlers } from "./lib/errorReporter";
 import {
   ipc,
@@ -129,27 +132,35 @@ function App() {
     view.kind === "logs" ? (projects.find((p) => p.id === view.projectId)?.name ?? "") : "";
 
   return (
-    <main className="popover">
-      <header className="popover-header">
+    <main className="flex h-screen flex-col bg-background text-foreground">
+      <header className="flex shrink-0 items-center gap-2 border-b border-border px-3.5 py-2.5">
         {view.kind === "list" ? (
           <>
-            <span className="popover-title">easy-term</span>
-            <button title="Diagnóstico" onClick={() => setView({ kind: "settings" })}>
-              ⚙
-            </button>
-            <button
-              className="header-action"
-              onClick={() => setView({ kind: "form", project: null })}
-            >
-              + Proyecto
-            </button>
+            <span className="flex-1 truncate text-[13px] font-semibold">easy-term</span>
+            <IconTooltip label="Diagnóstico">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setView({ kind: "settings" })}
+              >
+                <SlidersHorizontalIcon />
+              </Button>
+            </IconTooltip>
+            <Button size="sm" onClick={() => setView({ kind: "form", project: null })}>
+              <PlusIcon />
+              Proyecto
+            </Button>
           </>
         ) : (
           <>
-            <button className="header-back" onClick={() => setView({ kind: "list" })}>
-              ‹
-            </button>
-            <span className="popover-title">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setView({ kind: "list" })}
+            >
+              <ChevronLeftIcon />
+            </Button>
+            <span className="flex-1 truncate text-[13px] font-semibold">
               {view.kind === "form"
                 ? view.project
                   ? "Editar proyecto"
@@ -162,7 +173,7 @@ function App() {
         )}
       </header>
 
-      <div className="popover-body">
+      <div className="flex min-h-0 flex-1 flex-col">
         {view.kind === "list" && (
           <ProjectList
             onEdit={(project) => setView({ kind: "form", project })}
