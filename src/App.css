@@ -39,30 +39,28 @@
 }
 
 .dark {
-  /* Deep navy-charcoal rather than neutral gray, with a warm terracotta
-     accent (--primary) — matches the reference usage-dashboard palette
-     the user asked to adopt, instead of the grayscale shadcn default.
-     Chroma pushed noticeably higher than a first pass at this (0.015) —
-     that read as indistinguishable from plain black/gray at a glance. */
-  --background: oklch(0.14 0.035 265);
-  --foreground: oklch(0.97 0.008 265);
-  --card: oklch(0.2 0.04 265);
-  --card-foreground: oklch(0.97 0.008 265);
-  --popover: oklch(0.22 0.04 265);
-  --popover-foreground: oklch(0.97 0.008 265);
+  /* Warm dark brown/khaki background (matches a reference screenshot),
+     with a terracotta --primary accent from the same warm family — the
+     navy version this replaced didn't land with the user. */
+  --background: oklch(0.26 0.024 68);
+  --foreground: oklch(0.97 0.006 68);
+  --card: oklch(0.31 0.026 68);
+  --card-foreground: oklch(0.97 0.006 68);
+  --popover: oklch(0.33 0.026 68);
+  --popover-foreground: oklch(0.97 0.006 68);
   --primary: oklch(0.72 0.15 45);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.25 0.038 265);
-  --secondary-foreground: oklch(0.97 0.008 265);
-  --muted: oklch(0.25 0.038 265);
-  --muted-foreground: oklch(0.7 0.025 265);
-  --accent: oklch(0.28 0.04 265);
-  --accent-foreground: oklch(0.97 0.008 265);
+  --secondary: oklch(0.35 0.026 68);
+  --secondary-foreground: oklch(0.97 0.006 68);
+  --muted: oklch(0.35 0.026 68);
+  --muted-foreground: oklch(0.72 0.02 68);
+  --accent: oklch(0.38 0.028 68);
+  --accent-foreground: oklch(0.97 0.006 68);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.6 0.04 265);
+  --ring: oklch(0.6 0.03 68);
 }
 
 @theme inline {
