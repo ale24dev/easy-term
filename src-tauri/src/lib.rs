@@ -224,6 +224,7 @@ pub fn run() {
             commands::stop_project,
             commands::restart_project,
             commands::get_process_output,
+            commands::list_process_statuses,
             commands::get_error_count,
             commands::reset_error_count,
             commands::list_groups,

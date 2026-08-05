@@ -84,6 +84,13 @@ pub fn get_process_output(app: AppHandle, id: String) -> String {
 }
 
 #[tauri::command]
+pub fn list_process_statuses(
+    manager: State<ProcessManager>,
+) -> Vec<process_manager::StatusPayload> {
+    manager.snapshot_all()
+}
+
+#[tauri::command]
 pub fn get_error_count(manager: State<ProcessManager>, id: String) -> u32 {
     manager.error_count(&id)
 }

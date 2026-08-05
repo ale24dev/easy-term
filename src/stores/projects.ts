@@ -34,6 +34,7 @@ interface ProjectsState {
 
   loadProjects: () => Promise<void>;
   loadGroups: () => Promise<void>;
+  syncStatuses: () => Promise<void>;
   saveProject: (input: ProjectInput) => Promise<Project | null>;
   deleteProject: (id: string) => Promise<void>;
   start: (id: string) => Promise<void>;
@@ -71,6 +72,27 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
       set({ groups });
     } catch {
       // Groups are an enhancement — an empty list just means no sections.
+    }
+  },
+
+  // Reconciles runtime status with the backend's live source of truth.
+  // process:status events can be missed on the frontend side — e.g. a dev
+  // reload that resets this store while a project keeps running, or the
+  // launch-time restore-previously-running thread emitting before the UI
+  // is listening — leaving a project stuck showing "stopped" with no way
+  // to stop/restart it from the UI even though it's still alive.
+  syncStatuses: async () => {
+    try {
+      const statuses = await ipc.listProcessStatuses();
+      set((state) => {
+        const runtime = { ...state.runtime };
+        for (const s of statuses) {
+          runtime[s.id] = { ...(runtime[s.id] ?? DEFAULT_RUNTIME), status: s.status, pid: s.pid };
+        }
+        return { runtime };
+      });
+    } catch {
+      // Best-effort — live process:status events still cover most cases.
     }
   },
 

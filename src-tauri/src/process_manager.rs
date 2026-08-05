@@ -123,10 +123,28 @@ impl ProcessManager {
     pub fn pid_of(&self, id: &str) -> Option<i32> {
         self.processes.lock().unwrap().get(id).map(|h| h.pid)
     }
+
+    /// Full status+pid snapshot for every project the manager has ever
+    /// touched this session. Lets the frontend reconcile its runtime state
+    /// with reality on (re)mount — e.g. after a dev-mode HMR full reload,
+    /// or right after launch when a restored project's own `starting`/
+    /// `running` events may have fired before the UI was listening.
+    pub fn snapshot_all(&self) -> Vec<StatusPayload> {
+        let statuses = self.statuses.lock().unwrap();
+        let processes = self.processes.lock().unwrap();
+        statuses
+            .iter()
+            .map(|(id, status)| StatusPayload {
+                id: id.clone(),
+                status: *status,
+                pid: processes.get(id).map(|h| h.pid as u32),
+            })
+            .collect()
+    }
 }
 
 #[derive(Serialize, Clone)]
-struct StatusPayload {
+pub struct StatusPayload {
     id: String,
     status: ProjectStatus,
     pid: Option<u32>,

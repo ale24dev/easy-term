@@ -13,10 +13,12 @@ vi.mock("../lib/ipc", () => ({
     startGroup: vi.fn(),
     stopGroup: vi.fn(),
     resetErrorCount: vi.fn(),
+    listProcessStatuses: vi.fn(),
   },
 }));
 
 import { ipc } from "../lib/ipc";
+import type { StatusEvent } from "../lib/ipc";
 import { DEFAULT_RUNTIME, getRuntime, useProjectsStore } from "./projects";
 
 function project(overrides: Partial<Project> = {}): Project {
@@ -82,6 +84,32 @@ describe("loadGroups", () => {
   });
 });
 
+describe("syncStatuses", () => {
+  it("reconciles runtime status/pid from the backend without touching other runtime fields", async () => {
+    useProjectsStore.setState({
+      runtime: { p1: { ...DEFAULT_RUNTIME, status: "stopped", errorCount: 4 } },
+    });
+    const statuses: StatusEvent[] = [{ id: "p1", status: "running", pid: 999 }];
+    vi.mocked(ipc.listProcessStatuses).mockResolvedValue(statuses);
+
+    await useProjectsStore.getState().syncStatuses();
+
+    const runtime = useProjectsStore.getState().runtime["p1"];
+    expect(runtime.status).toBe("running");
+    expect(runtime.pid).toBe(999);
+    expect(runtime.errorCount).toBe(4);
+  });
+
+  it("is a no-op when the ipc call fails", async () => {
+    useProjectsStore.setState({ runtime: { p1: { ...DEFAULT_RUNTIME, status: "running" } } });
+    vi.mocked(ipc.listProcessStatuses).mockRejectedValue(new Error("boom"));
+
+    await useProjectsStore.getState().syncStatuses();
+
+    expect(useProjectsStore.getState().runtime["p1"].status).toBe("running");
+  });
+});
+
 describe("saveProject", () => {
   it("appends a brand-new project to the list", async () => {
     const saved = project();
@@ -91,6 +119,17 @@ describe("saveProject", () => {
 
     expect(result).toEqual(saved);
     expect(useProjectsStore.getState().projects).toEqual([saved]);
+  });
+
+  it("refreshes groups so a group created in the same submit shows up immediately", async () => {
+    const saved = project();
+    vi.mocked(ipc.saveProject).mockResolvedValue(saved);
+    const groups: Group[] = [{ id: "g1", name: "backend", projectIds: [saved.id] }];
+    vi.mocked(ipc.listGroups).mockResolvedValue(groups);
+
+    await useProjectsStore.getState().saveProject(saved);
+
+    expect(useProjectsStore.getState().groups).toEqual(groups);
   });
 
   it("replaces an existing project in place instead of duplicating it", async () => {

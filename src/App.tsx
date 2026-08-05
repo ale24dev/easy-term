@@ -38,6 +38,7 @@ function App() {
   const projects = useProjectsStore((s) => s.projects);
   const loadProjects = useProjectsStore((s) => s.loadProjects);
   const loadGroups = useProjectsStore((s) => s.loadGroups);
+  const syncStatuses = useProjectsStore((s) => s.syncStatuses);
   const setStatus = useProjectsStore((s) => s.setStatus);
   const setDetectedUrl = useProjectsStore((s) => s.setDetectedUrl);
   const setErrorCount = useProjectsStore((s) => s.setErrorCount);
@@ -67,6 +68,11 @@ function App() {
       onRestartExhausted((e) => setRestartInfo(e.id, null)),
     ];
 
+    // Reconcile in case the backend already knows about running processes
+    // this store hasn't heard about yet (dev-mode reload, or a restore-at-
+    // launch project whose events fired before this listener was attached).
+    syncStatuses();
+
     // Clicking a crash notification jumps straight to that project's logs
     // and brings the (normally hidden) popover to the front.
     onNotificationAction((notification) => {
@@ -85,6 +91,7 @@ function App() {
   }, [
     loadProjects,
     loadGroups,
+    syncStatuses,
     setStatus,
     setDetectedUrl,
     setErrorCount,

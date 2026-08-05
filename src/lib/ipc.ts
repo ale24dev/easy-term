@@ -152,6 +152,7 @@ export const ipc = {
   stopProject: (id: string) => call<void>("stop_project", { id }),
   restartProject: (id: string) => call<void>("restart_project", { id }),
   getProcessOutput: (id: string) => call<string>("get_process_output", { id }),
+  listProcessStatuses: () => call<StatusEvent[]>("list_process_statuses"),
   getErrorCount: (id: string) => call<number>("get_error_count", { id }),
   resetErrorCount: (id: string) => call<void>("reset_error_count", { id }),
   detectScripts: (path: string) => call<DetectedConfig>("detect_scripts", { path }),
