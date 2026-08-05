@@ -139,6 +139,14 @@ pub fn convert_to_menubar_panel(app: &AppHandle) {
     // over a full-screen Space bounced.
     panel.set_style_mask(NSWindowStyleMaskNonActivatingPanel);
 
+    // Belt and suspenders for the rounded-corner window shell (CSS
+    // border-radius + overflow:hidden on `body`, tauri.conf.json's window
+    // `transparent: true`): make sure the panel itself is non-opaque too,
+    // in case anything about the class swizzle above interacts with
+    // whichever point in window setup wry's own transparency handling
+    // runs at. Explicit here rather than assumed from config alone.
+    panel.set_opaque(false);
+
     panel.set_delegate(delegate);
 }
 
