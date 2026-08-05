@@ -22,7 +22,7 @@
         "skipTaskbar": true,
         "visible": false,
         "shadow": true,
-        "transparent": false
+        "transparent": true
       }
     ],
     "security": {

@@ -39,28 +39,27 @@
 }
 
 .dark {
-  /* Warm dark brown/khaki background (matches a reference screenshot),
-     with a terracotta --primary accent from the same warm family — the
-     navy version this replaced didn't land with the user. */
-  --background: oklch(0.26 0.024 68);
-  --foreground: oklch(0.97 0.006 68);
-  --card: oklch(0.31 0.026 68);
-  --card-foreground: oklch(0.97 0.006 68);
-  --popover: oklch(0.33 0.026 68);
-  --popover-foreground: oklch(0.97 0.006 68);
-  --primary: oklch(0.72 0.15 45);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.35 0.026 68);
-  --secondary-foreground: oklch(0.97 0.006 68);
-  --muted: oklch(0.35 0.026 68);
-  --muted-foreground: oklch(0.72 0.02 68);
-  --accent: oklch(0.38 0.028 68);
-  --accent-foreground: oklch(0.97 0.006 68);
+  /* shadcn/ui's stock default dark theme (zinc) — back to this after two
+     rounds of custom backgrounds (navy, then warm brown) neither landed. */
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.6 0.03 68);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
 }
 
 @theme inline {
@@ -109,6 +108,15 @@
     height: 100%;
     margin: 0;
     overflow: hidden;
+  }
+
+  /* The window itself is transparent (tauri.conf.json) so this rounded,
+     opaque shell reads as a rounded window instead of a square one with a
+     rounded div floating inside it. rounded-xl (not a bare var()) because
+     --radius-xl only exists inlined into generated utilities, not as its
+     own custom property, under Tailwind v4's `@theme inline`. */
+  body {
+    @apply rounded-xl;
   }
 
   body {
