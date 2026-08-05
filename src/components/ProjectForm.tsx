@@ -1,27 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
+import { PlusIcon, XIcon } from "lucide-react";
 import { useProjectsStore } from "../stores/projects";
 import { ipc, type DetectedScript, type Project } from "../lib/ipc";
+import { ColorSwatchPicker } from "./ColorSwatchPicker";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { cn } from "@/lib/utils";
 
 const DEFAULT_COMMAND = "pnpm run dev";
-
-const COLOR_OPTIONS = [
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#14b8a6",
-  "#3b82f6",
-  "#8b5cf6",
-  "#ec4899",
-];
 
 interface EnvRow {
   key: string;
@@ -251,34 +240,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
 
       <div className="flex flex-col gap-1.5">
         <Label>Color (optional)</Label>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            title="No color"
-            onClick={() => setColor(null)}
-            className={cn(
-              "flex size-6 items-center justify-center rounded-full border border-dashed border-input text-muted-foreground",
-              color === null && "ring-2 ring-ring ring-offset-2 ring-offset-background",
-            )}
-          >
-            <XIcon className="size-3" />
-          </button>
-          {COLOR_OPTIONS.map((swatch) => (
-            <button
-              key={swatch}
-              type="button"
-              title={swatch}
-              onClick={() => setColor(swatch)}
-              className={cn(
-                "flex size-6 items-center justify-center rounded-full",
-                color === swatch && "ring-2 ring-ring ring-offset-2 ring-offset-background",
-              )}
-              style={{ backgroundColor: swatch }}
-            >
-              {color === swatch && <CheckIcon className="size-3 text-white" />}
-            </button>
-          ))}
-        </div>
+        <ColorSwatchPicker value={color} onChange={setColor} />
       </div>
 
       <div className="flex items-center gap-2">

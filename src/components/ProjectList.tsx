@@ -12,10 +12,12 @@ import {
 } from "lucide-react";
 import { useProjectsStore, getRuntime } from "../stores/projects";
 import { ipc, type PortOwner, type Project } from "../lib/ipc";
+import { ColorSwatchPicker } from "./ColorSwatchPicker";
 import { PortConflictDialog } from "./PortConflictDialog";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { IconTooltip } from "./ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -73,8 +75,24 @@ function ProjectRow({
   const restart = useProjectsStore((s) => s.restart);
   const deleteProject = useProjectsStore((s) => s.deleteProject);
   const togglePin = useProjectsStore((s) => s.togglePin);
+  const saveProject = useProjectsStore((s) => s.saveProject);
   const isActive = status === "running" || status === "starting";
   const isAutoRestarting = status === "crashed" && restartInfo !== null;
+
+  function handleColorChange(color: string | null) {
+    saveProject({
+      id: project.id,
+      name: project.name,
+      path: project.path,
+      command: project.command,
+      port: project.port,
+      env: project.env,
+      autoRestart: project.autoRestart,
+      groupId: project.groupId,
+      color,
+      pinned: project.pinned,
+    });
+  }
 
   // The checkbox column is hidden until the user long-presses a row to
   // enter selection mode — no permanent selector cluttering the list.
@@ -120,6 +138,26 @@ function ProjectRow({
           aria-label={`Select ${project.name}`}
         />
       )}
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            title={project.color ? "Change color" : "Set color"}
+            className="flex shrink-0 items-center justify-center rounded-sm p-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <span
+              className={cn(
+                "h-4 w-1 rounded-full",
+                !project.color && "border border-dashed border-muted-foreground/50",
+              )}
+              style={project.color ? { backgroundColor: project.color } : undefined}
+            />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto" align="start">
+          <ColorSwatchPicker value={project.color} onChange={handleColorChange} />
+        </PopoverContent>
+      </Popover>
       <button
         className="flex min-w-0 flex-1 select-none items-center gap-2 text-left"
         onPointerDown={startPressTimer}
@@ -129,12 +167,6 @@ function ProjectRow({
         onContextMenu={(e) => e.preventDefault()}
         onClick={handleRowClick}
       >
-        {project.color && (
-          <span
-            className="h-4 w-1 shrink-0 rounded-full"
-            style={{ backgroundColor: project.color }}
-          />
-        )}
         <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[status])} />
         <span className="truncate text-[12px]">{project.name}</span>
         {project.port !== null && (
