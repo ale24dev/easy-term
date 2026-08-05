@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -47,11 +47,14 @@ function sortPinnedFirst<T extends { pinned: boolean }>(items: T[]): T[] {
   return [...items].sort((a, b) => Number(b.pinned) - Number(a.pinned));
 }
 
+const LONG_PRESS_MS = 500;
+
 interface ProjectRowProps {
   project: Project;
   onEdit: (project: Project) => void;
   onOpenLogs: (id: string) => void;
   onStart: (project: Project) => void;
+  selectionMode: boolean;
   selected: boolean;
   onToggleSelect: (id: string) => void;
 }
@@ -61,6 +64,7 @@ function ProjectRow({
   onEdit,
   onOpenLogs,
   onStart,
+  selectionMode,
   selected,
   onToggleSelect,
 }: ProjectRowProps) {
@@ -72,17 +76,58 @@ function ProjectRow({
   const isActive = status === "running" || status === "starting";
   const isAutoRestarting = status === "crashed" && restartInfo !== null;
 
+  // The checkbox column is hidden until the user long-presses a row to
+  // enter selection mode — no permanent selector cluttering the list.
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFired = useRef(false);
+
+  function startPressTimer() {
+    longPressFired.current = false;
+    pressTimer.current = setTimeout(() => {
+      longPressFired.current = true;
+      onToggleSelect(project.id);
+    }, LONG_PRESS_MS);
+  }
+
+  function cancelPressTimer() {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  }
+
+  function handleRowClick() {
+    // The long press already acted (selected/deselected this row) — the
+    // click that follows the mouseup is just its trailing synthetic event.
+    if (longPressFired.current) {
+      longPressFired.current = false;
+      return;
+    }
+    if (selectionMode) {
+      onToggleSelect(project.id);
+    } else {
+      onOpenLogs(project.id);
+    }
+  }
+
   return (
     <li className="group flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-accent/60">
-      <Checkbox
-        checked={selected}
-        onCheckedChange={() => onToggleSelect(project.id)}
-        className="shrink-0"
-        aria-label={`Select ${project.name}`}
-      />
+      {selectionMode && (
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleSelect(project.id)}
+          className="shrink-0"
+          aria-label={`Select ${project.name}`}
+        />
+      )}
       <button
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        onClick={() => onOpenLogs(project.id)}
+        className="flex min-w-0 flex-1 select-none items-center gap-2 text-left"
+        onPointerDown={startPressTimer}
+        onPointerUp={cancelPressTimer}
+        onPointerLeave={cancelPressTimer}
+        onPointerCancel={cancelPressTimer}
+        onContextMenu={(e) => e.preventDefault()}
+        onClick={handleRowClick}
       >
         {project.color && (
           <span
@@ -178,6 +223,7 @@ interface GroupSectionProps {
   onEdit: (project: Project) => void;
   onOpenLogs: (id: string) => void;
   onStart: (project: Project) => void;
+  selectionMode: boolean;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onToggleSelectMany: (ids: string[], select: boolean) => void;
@@ -191,6 +237,7 @@ function GroupSection({
   onEdit,
   onOpenLogs,
   onStart,
+  selectionMode,
   selectedIds,
   onToggleSelect,
   onToggleSelectMany,
@@ -207,11 +254,13 @@ function GroupSection({
     <li className="mb-1">
       <div className="flex items-center justify-between px-2 py-1">
         <div className="flex items-center gap-1.5">
-          <Checkbox
-            checked={allSelected ? true : someSelected ? "indeterminate" : false}
-            onCheckedChange={() => onToggleSelectMany(memberIds, !allSelected)}
-            aria-label={`Select all in ${name}`}
-          />
+          {selectionMode && (
+            <Checkbox
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              onCheckedChange={() => onToggleSelectMany(memberIds, !allSelected)}
+              aria-label={`Select all in ${name}`}
+            />
+          )}
           <button
             className="flex items-center gap-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
             onClick={() => setCollapsed((c) => !c)}
@@ -244,6 +293,7 @@ function GroupSection({
               onEdit={onEdit}
               onOpenLogs={onOpenLogs}
               onStart={onStart}
+              selectionMode={selectionMode}
               selected={selectedIds.has(project.id)}
               onToggleSelect={onToggleSelect}
             />
@@ -266,6 +316,10 @@ export function ProjectList({ onEdit, onOpenLogs }: ProjectListProps) {
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [resolving, setResolving] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Derived, not its own state: selection mode starts the moment a long
+  // press adds the first id, and ends the moment the set empties out again
+  // (via the clear button or deselecting the last selected row).
+  const selectionMode = selectedIds.size > 0;
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -384,6 +438,7 @@ export function ProjectList({ onEdit, onOpenLogs }: ProjectListProps) {
               onEdit={onEdit}
               onOpenLogs={onOpenLogs}
               onStart={handleStart}
+              selectionMode={selectionMode}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               onToggleSelectMany={toggleSelectMany}
@@ -398,13 +453,14 @@ export function ProjectList({ onEdit, onOpenLogs }: ProjectListProps) {
             onEdit={onEdit}
             onOpenLogs={onOpenLogs}
             onStart={handleStart}
+            selectionMode={selectionMode}
             selected={selectedIds.has(project.id)}
             onToggleSelect={toggleSelect}
           />
         ))}
       </ul>
 
-      {selectedIds.size > 0 && (
+      {selectionMode && (
         <div className="flex shrink-0 items-center gap-1.5 border-t border-border px-2.5 py-1.5">
           <span className="text-[11px] text-muted-foreground">{selectedIds.size} selected</span>
           <div className="ml-auto flex items-center gap-1">
