@@ -419,7 +419,7 @@ pub fn read_error_log(day: Option<String>, limit: Option<usize>) -> Result<Vec<V
             return Err(AppError::new(
                 "error_logger",
                 "STORE_READ_FAILED",
-                format!("No se pudo leer el log de errores: {e}"),
+                format!("Could not read the error log: {e}"),
             ))
         }
     };
@@ -446,14 +446,14 @@ pub fn open_logs_folder() -> Result<(), AppError> {
         AppError::new(
             "error_logger",
             "IO_CREATE_DIR_FAILED",
-            format!("No se pudo crear la carpeta de logs: {e}"),
+            format!("Could not create the logs folder: {e}"),
         )
     })?;
     tauri_plugin_opener::open_path(dir.to_string_lossy().to_string(), None::<&str>).map_err(|e| {
         AppError::new(
             "error_logger",
             "IO_OPEN_FAILED",
-            format!("No se pudo abrir la carpeta de logs: {e}"),
+            format!("Could not open the logs folder: {e}"),
         )
     })
 }

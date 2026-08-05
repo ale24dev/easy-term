@@ -16,7 +16,7 @@ fn find_project(store: &ProjectStore, id: &str) -> Result<Project, AppError> {
         AppError::new(
             "commands",
             "STORE_PROJECT_NOT_FOUND",
-            format!("Proyecto no encontrado: {id}"),
+            format!("Project not found: {id}"),
         )
     })
 }
@@ -111,6 +111,16 @@ pub fn find_or_create_group(store: State<ProjectStore>, name: String) -> Result<
 }
 
 #[tauri::command]
+pub fn toggle_project_pin(store: State<ProjectStore>, id: String) -> Result<Project, AppError> {
+    store.toggle_project_pin(&id)
+}
+
+#[tauri::command]
+pub fn toggle_group_pin(store: State<ProjectStore>, id: String) -> Result<Group, AppError> {
+    store.toggle_group_pin(&id)
+}
+
+#[tauri::command]
 pub fn start_group(
     app: AppHandle,
     store: State<ProjectStore>,
@@ -120,7 +130,7 @@ pub fn start_group(
         AppError::new(
             "commands",
             "STORE_PROJECT_NOT_FOUND",
-            format!("Grupo no encontrado: {group_id}"),
+            format!("Group not found: {group_id}"),
         )
     })?;
 
@@ -144,7 +154,7 @@ pub fn stop_group(
         AppError::new(
             "commands",
             "STORE_PROJECT_NOT_FOUND",
-            format!("Grupo no encontrado: {group_id}"),
+            format!("Group not found: {group_id}"),
         )
     })?;
 
@@ -176,7 +186,7 @@ pub fn open_in_editor(path: String) -> Result<(), AppError> {
     Err(AppError::new(
         "commands",
         "EDITOR_NOT_FOUND",
-        "No se encontró \"cursor\" ni \"code\" en el PATH",
+        "Could not find \"cursor\" or \"code\" on PATH",
     ))
 }
 

@@ -28,18 +28,18 @@ export function PortConflictDialog({
     <Dialog open onOpenChange={(open) => !open && !busy && onCancel()}>
       <DialogContent showClose={!busy}>
         <DialogHeader>
-          <DialogTitle>Puerto {port} ocupado</DialogTitle>
+          <DialogTitle>Port {port} is in use</DialogTitle>
           <DialogDescription>
-            <strong className="text-foreground">{owner.name}</strong> (pid {owner.pid}) ya está
-            escuchando en este puerto.
+            <strong className="text-foreground">{owner.name}</strong> (pid {owner.pid}) is
+            already listening on this port.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-            Cancelar
+            Cancel
           </Button>
           <Button type="button" onClick={onFreeAndStart} disabled={busy}>
-            {busy ? "Liberando…" : "Liberar y continuar"}
+            {busy ? "Freeing…" : "Free and continue"}
           </Button>
         </DialogFooter>
       </DialogContent>

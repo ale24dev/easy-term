@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { PlusIcon, XIcon } from "lucide-react";
+import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 import { useProjectsStore } from "../stores/projects";
 import { ipc, type DetectedScript, type Project } from "../lib/ipc";
 import { Button } from "./ui/button";
@@ -8,8 +8,20 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { cn } from "@/lib/utils";
 
 const DEFAULT_COMMAND = "pnpm run dev";
+
+const COLOR_OPTIONS = [
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#14b8a6",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+];
 
 interface EnvRow {
   key: string;
@@ -38,6 +50,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
     () => groups.find((g) => g.id === initial?.groupId)?.name ?? "",
   );
   const [autoRestart, setAutoRestart] = useState(initial?.autoRestart ?? false);
+  const [color, setColor] = useState<string | null>(initial?.color ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,7 +107,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
     event.preventDefault();
 
     if (!name.trim() || !path.trim() || !command.trim()) {
-      setError("Nombre, ruta y comando son obligatorios.");
+      setError("Name, path, and command are required.");
       return;
     }
 
@@ -102,7 +115,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
     if (port.trim()) {
       parsedPort = Number(port);
       if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-        setError("El puerto debe ser un número entre 1 y 65535.");
+        setError("Port must be a number between 1 and 65535.");
         return;
       }
     }
@@ -122,7 +135,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
         groupId = group.id;
       } catch {
         setSaving(false);
-        setError("No se pudo crear/encontrar el grupo.");
+        setError("Could not create/find the group.");
         return;
       }
     }
@@ -136,6 +149,8 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
       env,
       autoRestart,
       groupId,
+      color,
+      pinned: initial?.pinned ?? false,
     });
 
     setSaving(false);
@@ -143,7 +158,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
     if (saved) {
       onSaved(saved);
     } else {
-      setError("No se pudo guardar el proyecto.");
+      setError("Could not save the project.");
     }
   }
 
@@ -153,27 +168,27 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
       onSubmit={handleSubmit}
     >
       <div className="flex flex-col gap-1">
-        <Label>Ruta del proyecto</Label>
+        <Label>Project path</Label>
         <div className="flex gap-1.5">
-          <Input value={path} readOnly placeholder="Elige una carpeta…" />
+          <Input value={path} readOnly placeholder="Choose a folder…" />
           <Button type="button" variant="outline" size="sm" onClick={handlePickFolder}>
-            Elegir…
+            Choose…
           </Button>
         </div>
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="project-name">Nombre</Label>
+        <Label htmlFor="project-name">Name</Label>
         <Input
           id="project-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="mi-proyecto"
+          placeholder="my-project"
         />
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="project-command">Comando</Label>
+        <Label htmlFor="project-command">Command</Label>
         <Input
           id="project-command"
           className="font-mono"
@@ -185,7 +200,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
 
       {scripts.length > 0 && (
         <div className="flex flex-col gap-1">
-          <Label>Scripts detectados</Label>
+          <Label>Detected scripts</Label>
           <Select
             value={scripts.find((s) => s.command === command)?.name ?? undefined}
             onValueChange={(value) => {
@@ -194,7 +209,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
             }}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Elegir un script…" />
+              <SelectValue placeholder="Choose a script…" />
             </SelectTrigger>
             <SelectContent>
               {scripts.map((script) => (
@@ -208,7 +223,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
       )}
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="project-port">Puerto (opcional)</Label>
+        <Label htmlFor="project-port">Port (optional)</Label>
         <Input
           id="project-port"
           value={port}
@@ -219,7 +234,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="project-group">Grupo (opcional)</Label>
+        <Label htmlFor="project-group">Group (optional)</Label>
         <Input
           id="project-group"
           value={groupName}
@@ -234,28 +249,60 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
         </datalist>
       </div>
 
+      <div className="flex flex-col gap-1.5">
+        <Label>Color (optional)</Label>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            title="No color"
+            onClick={() => setColor(null)}
+            className={cn(
+              "flex size-6 items-center justify-center rounded-full border border-dashed border-input text-muted-foreground",
+              color === null && "ring-2 ring-ring ring-offset-2 ring-offset-background",
+            )}
+          >
+            <XIcon className="size-3" />
+          </button>
+          {COLOR_OPTIONS.map((swatch) => (
+            <button
+              key={swatch}
+              type="button"
+              title={swatch}
+              onClick={() => setColor(swatch)}
+              className={cn(
+                "flex size-6 items-center justify-center rounded-full",
+                color === swatch && "ring-2 ring-ring ring-offset-2 ring-offset-background",
+              )}
+              style={{ backgroundColor: swatch }}
+            >
+              {color === swatch && <CheckIcon className="size-3 text-white" />}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex items-center gap-2">
         <Switch id="auto-restart" checked={autoRestart} onCheckedChange={setAutoRestart} />
         <Label htmlFor="auto-restart" className="text-foreground">
-          Reiniciar automáticamente si crashea
+          Automatically restart on crash
         </Label>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label>Variables de entorno</Label>
+        <Label>Environment variables</Label>
         <div className="flex flex-col gap-1.5">
           {envRows.map((row, index) => (
             <div className="flex items-center gap-1.5" key={index}>
               <Input
                 value={row.key}
                 onChange={(e) => updateEnvRow(index, "key", e.target.value)}
-                placeholder="CLAVE"
+                placeholder="KEY"
                 className="font-mono"
               />
               <Input
                 value={row.value}
                 onChange={(e) => updateEnvRow(index, "value", e.target.value)}
-                placeholder="valor"
+                placeholder="value"
                 className="font-mono"
               />
               <Button
@@ -277,7 +324,7 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
             onClick={addEnvRow}
           >
             <PlusIcon />
-            Agregar variable
+            Add variable
           </Button>
         </div>
       </div>
@@ -286,10 +333,10 @@ export function ProjectForm({ initial, onCancel, onSaved }: ProjectFormProps) {
 
       <div className="mt-auto flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-          Cancelar
+          Cancel
         </Button>
         <Button type="submit" disabled={saving}>
-          {saving ? "Guardando…" : "Guardar"}
+          {saving ? "Saving…" : "Save"}
         </Button>
       </div>
     </form>

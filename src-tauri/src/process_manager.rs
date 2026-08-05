@@ -223,7 +223,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
             return Err(AppError::new(
                 MODULE,
                 "PROC_ALREADY_RUNNING",
-                format!("El proyecto \"{}\" ya está corriendo", project.name),
+                format!("Project \"{}\" is already running", project.name),
             ));
         }
     }
@@ -243,7 +243,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
             AppError::new(
                 MODULE,
                 "PTY_SPAWN_FAILED",
-                format!("No se pudo abrir el PTY: {e}"),
+                format!("Could not open the PTY: {e}"),
             )
             .with_context(serde_json::json!({ "projectId": project.id }))
         })?;
@@ -263,7 +263,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
         AppError::new(
             MODULE,
             "PTY_SPAWN_FAILED",
-            format!("No se pudo iniciar \"{}\": {e}", project.command),
+            format!("Could not start \"{}\": {e}", project.command),
         )
         .with_context(serde_json::json!({ "projectId": project.id, "command": project.command }))
     })?;
@@ -273,16 +273,19 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
     // lingering copy would otherwise block that forever after the child exits.
     drop(pair.slave);
 
-    let pid = child
-        .process_id()
-        .ok_or_else(|| AppError::new(MODULE, "PTY_SPAWN_FAILED", "El proceso no devolvió un PID"))?
-        as i32;
+    let pid = child.process_id().ok_or_else(|| {
+        AppError::new(
+            MODULE,
+            "PTY_SPAWN_FAILED",
+            "The process didn't return a PID",
+        )
+    })? as i32;
 
     let reader = pair.master.try_clone_reader().map_err(|e| {
         AppError::new(
             MODULE,
             "PTY_READ_ERROR",
-            format!("No se pudo obtener el lector del PTY: {e}"),
+            format!("Could not get the PTY reader: {e}"),
         )
     })?;
 
@@ -396,7 +399,7 @@ fn schedule_restart(app: &AppHandle, project: Project) {
             MODULE,
             "PROC_RESTART_LIMIT_REACHED",
             format!(
-                "\"{}\" superó {MAX_RESTART_ATTEMPTS} reintentos automáticos",
+                "\"{}\" exceeded {MAX_RESTART_ATTEMPTS} automatic restart attempts",
                 project.name
             ),
             Some(serde_json::json!({ "projectId": project.id })),
@@ -473,7 +476,7 @@ pub fn start_group(app: &AppHandle, projects: Vec<Project>) {
                     Source::Backend,
                     MODULE,
                     "PROC_GROUP_START_FAILED",
-                    format!("No se pudo iniciar \"{name}\" dentro del grupo: {e}"),
+                    format!("Could not start \"{name}\" inside the group: {e}"),
                     Some(serde_json::json!({ "projectId": id })),
                     None,
                 );
@@ -521,7 +524,7 @@ fn send_signal(id: &str, pid: i32, signal: i32) -> Result<(), AppError> {
             return Err(AppError::new(
                 MODULE,
                 "PROC_KILL_FAILED",
-                format!("No se pudo enviar la señal {signal} al proceso {pid}: {err}"),
+                format!("Could not send signal {signal} to process {pid}: {err}"),
             )
             .with_context(serde_json::json!({ "projectId": id, "pid": pid })));
         }
@@ -731,7 +734,7 @@ fn spawn_waiter_thread(
                     Source::Backend,
                     MODULE,
                     "PROC_UNEXPECTED_EXIT",
-                    format!("\"{name}\" terminó inesperadamente (code {code})"),
+                    format!("\"{name}\" exited unexpectedly (code {code})"),
                     Some(serde_json::json!({ "projectId": id, "code": code })),
                     None,
                 );

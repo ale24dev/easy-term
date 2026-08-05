@@ -17,7 +17,7 @@ pub fn init(app: &AppHandle) {
             Source::Backend,
             MODULE,
             "NOTIFY_PERMISSION_FAILED",
-            format!("No se pudo solicitar permiso de notificaciones: {e}"),
+            format!("Could not request notification permission: {e}"),
             None,
             None,
         );
@@ -28,8 +28,8 @@ pub fn notify_crash(app: &AppHandle, project_id: &str, project_name: &str, code:
     let result = app
         .notification()
         .builder()
-        .title(format!("{project_name} se detuvo"))
-        .body(format!("Terminó inesperadamente (código {code})"))
+        .title(format!("{project_name} stopped"))
+        .body(format!("Exited unexpectedly (code {code})"))
         .extra("projectId", project_id)
         .show();
 
@@ -39,7 +39,7 @@ pub fn notify_crash(app: &AppHandle, project_id: &str, project_name: &str, code:
             Source::Backend,
             MODULE,
             "NOTIFY_SHOW_FAILED",
-            format!("No se pudo mostrar la notificación de crash: {e}"),
+            format!("Could not show the crash notification: {e}"),
             Some(serde_json::json!({ "projectId": project_id })),
             None,
         );

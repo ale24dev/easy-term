@@ -229,6 +229,8 @@ pub fn run() {
             commands::reset_error_count,
             commands::list_groups,
             commands::find_or_create_group,
+            commands::toggle_project_pin,
+            commands::toggle_group_pin,
             commands::start_group,
             commands::stop_group,
             commands::get_project_stats,

@@ -26,7 +26,7 @@ pub fn stats_for_group(pgid: i32) -> Result<ProcessStats, AppError> {
             AppError::new(
                 MODULE,
                 "RESOURCE_STATS_FAILED",
-                format!("No se pudo ejecutar ps: {e}"),
+                format!("Could not run ps: {e}"),
             )
         })?;
 

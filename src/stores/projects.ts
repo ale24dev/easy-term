@@ -42,6 +42,8 @@ interface ProjectsState {
   restart: (id: string) => Promise<void>;
   startGroup: (groupId: string) => Promise<void>;
   stopGroup: (groupId: string) => Promise<void>;
+  togglePin: (id: string) => Promise<void>;
+  toggleGroupPin: (groupId: string) => Promise<void>;
 
   setStatus: (id: string, status: ProjectStatus, pid: number | null) => void;
   setDetectedUrl: (id: string, url: string) => void;
@@ -168,6 +170,28 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
   stopGroup: async (groupId) => {
     try {
       await ipc.stopGroup(groupId);
+    } catch {
+      //
+    }
+  },
+
+  togglePin: async (id) => {
+    try {
+      const updated = await ipc.toggleProjectPin(id);
+      set((state) => ({
+        projects: state.projects.map((p) => (p.id === updated.id ? updated : p)),
+      }));
+    } catch {
+      // ipc already reported the failure to the diagnostics log.
+    }
+  },
+
+  toggleGroupPin: async (groupId) => {
+    try {
+      const updated = await ipc.toggleGroupPin(groupId);
+      set((state) => ({
+        groups: state.groups.map((g) => (g.id === updated.id ? updated : g)),
+      }));
     } catch {
       //
     }

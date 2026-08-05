@@ -56,7 +56,7 @@ pub fn detect_scripts(path: String) -> Result<DetectedConfig, AppError> {
             return Err(AppError::new(
                 MODULE,
                 "DETECT_IO_ERROR",
-                format!("No se pudo leer package.json: {e}"),
+                format!("Could not read package.json: {e}"),
             ))
         }
     };
@@ -65,7 +65,7 @@ pub fn detect_scripts(path: String) -> Result<DetectedConfig, AppError> {
         AppError::new(
             MODULE,
             "DETECT_PKG_JSON_INVALID",
-            format!("package.json inválido: {e}"),
+            format!("Invalid package.json: {e}"),
         )
     })?;
 

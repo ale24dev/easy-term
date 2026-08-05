@@ -11,6 +11,8 @@ export interface Project {
   env: Record<string, string>;
   autoRestart: boolean;
   groupId: string | null;
+  color: string | null;
+  pinned: boolean;
 }
 
 export interface ProjectInput {
@@ -22,6 +24,8 @@ export interface ProjectInput {
   env: Record<string, string>;
   autoRestart: boolean;
   groupId: string | null;
+  color: string | null;
+  pinned: boolean;
 }
 
 export type ProjectStatus = "stopped" | "starting" | "running" | "crashed";
@@ -77,6 +81,7 @@ export interface Group {
   id: string;
   name: string;
   projectIds: string[];
+  pinned: boolean;
 }
 
 export interface RestartScheduledEvent {
@@ -163,6 +168,8 @@ export const ipc = {
   openLogsFolder: () => call<void>("open_logs_folder"),
   listGroups: () => call<Group[]>("list_groups"),
   findOrCreateGroup: (name: string) => call<Group>("find_or_create_group", { name }),
+  toggleProjectPin: (id: string) => call<Project>("toggle_project_pin", { id }),
+  toggleGroupPin: (id: string) => call<Group>("toggle_group_pin", { id }),
   startGroup: (groupId: string) => call<void>("start_group", { groupId }),
   stopGroup: (groupId: string) => call<void>("stop_group", { groupId }),
   getProjectStats: (id: string) => call<ProcessStats | null>("get_project_stats", { id }),

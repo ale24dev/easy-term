@@ -14,6 +14,8 @@ vi.mock("../lib/ipc", () => ({
     stopGroup: vi.fn(),
     resetErrorCount: vi.fn(),
     listProcessStatuses: vi.fn(),
+    toggleProjectPin: vi.fn(),
+    toggleGroupPin: vi.fn(),
   },
 }));
 
@@ -31,6 +33,8 @@ function project(overrides: Partial<Project> = {}): Project {
     env: {},
     autoRestart: false,
     groupId: null,
+    color: null,
+    pinned: false,
     ...overrides,
   };
 }
@@ -66,7 +70,7 @@ describe("loadProjects", () => {
 
 describe("loadGroups", () => {
   it("stores the list of groups", async () => {
-    const groups: Group[] = [{ id: "g1", name: "backend", projectIds: [] }];
+    const groups: Group[] = [{ id: "g1", name: "backend", projectIds: [], pinned: false }];
     vi.mocked(ipc.listGroups).mockResolvedValue(groups);
 
     await useProjectsStore.getState().loadGroups();
@@ -75,7 +79,7 @@ describe("loadGroups", () => {
   });
 
   it("leaves groups untouched when the ipc call fails", async () => {
-    useProjectsStore.setState({ groups: [{ id: "g1", name: "backend", projectIds: [] }] });
+    useProjectsStore.setState({ groups: [{ id: "g1", name: "backend", projectIds: [], pinned: false }] });
     vi.mocked(ipc.listGroups).mockRejectedValue(new Error("boom"));
 
     await useProjectsStore.getState().loadGroups();
@@ -124,7 +128,7 @@ describe("saveProject", () => {
   it("refreshes groups so a group created in the same submit shows up immediately", async () => {
     const saved = project();
     vi.mocked(ipc.saveProject).mockResolvedValue(saved);
-    const groups: Group[] = [{ id: "g1", name: "backend", projectIds: [saved.id] }];
+    const groups: Group[] = [{ id: "g1", name: "backend", projectIds: [saved.id], pinned: false }];
     vi.mocked(ipc.listGroups).mockResolvedValue(groups);
 
     await useProjectsStore.getState().saveProject(saved);
@@ -199,6 +203,44 @@ describe("start/stop/restart/startGroup/stopGroup", () => {
     expect(ipc.restartProject).toHaveBeenCalledWith("p1");
     expect(ipc.startGroup).toHaveBeenCalledWith("g1");
     expect(ipc.stopGroup).toHaveBeenCalledWith("g1");
+  });
+});
+
+describe("togglePin", () => {
+  it("replaces the project with the backend's toggled version", async () => {
+    useProjectsStore.setState({ projects: [project({ pinned: false })] });
+    vi.mocked(ipc.toggleProjectPin).mockResolvedValue(project({ pinned: true }));
+
+    await useProjectsStore.getState().togglePin("p1");
+
+    expect(useProjectsStore.getState().projects[0].pinned).toBe(true);
+  });
+
+  it("leaves state unchanged when the ipc call fails", async () => {
+    useProjectsStore.setState({ projects: [project({ pinned: false })] });
+    vi.mocked(ipc.toggleProjectPin).mockRejectedValue(new Error("boom"));
+
+    await useProjectsStore.getState().togglePin("p1");
+
+    expect(useProjectsStore.getState().projects[0].pinned).toBe(false);
+  });
+});
+
+describe("toggleGroupPin", () => {
+  it("replaces the group with the backend's toggled version", async () => {
+    useProjectsStore.setState({
+      groups: [{ id: "g1", name: "backend", projectIds: [], pinned: false }],
+    });
+    vi.mocked(ipc.toggleGroupPin).mockResolvedValue({
+      id: "g1",
+      name: "backend",
+      projectIds: [],
+      pinned: true,
+    });
+
+    await useProjectsStore.getState().toggleGroupPin("g1");
+
+    expect(useProjectsStore.getState().groups[0].pinned).toBe(true);
   });
 });
 

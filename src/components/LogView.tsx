@@ -160,7 +160,7 @@ export function LogView({ projectId }: LogViewProps) {
                 runSearch(searchTerm, e.shiftKey);
               }
             }}
-            placeholder="Buscar en el log…"
+            placeholder="Search the log…"
           />
           <Button
             type="button"
@@ -195,7 +195,7 @@ export function LogView({ projectId }: LogViewProps) {
             onClick={() => openUrl(openableUrl)}
           >
             <GlobeIcon className="shrink-0" />
-            <span className="truncate">Abrir {openableUrl}</span>
+            <span className="truncate">Open {openableUrl}</span>
           </Button>
         )}
         <div className="flex shrink-0 items-center gap-0.5">
@@ -203,30 +203,30 @@ export function LogView({ projectId }: LogViewProps) {
             <>
               {isActive ? (
                 <>
-                  <IconTooltip label="Reiniciar">
+                  <IconTooltip label="Restart">
                     <Button variant="ghost" size="icon" onClick={() => restart(project.id)}>
                       <RotateCwIcon />
                     </Button>
                   </IconTooltip>
-                  <IconTooltip label="Detener">
+                  <IconTooltip label="Stop">
                     <Button variant="ghost" size="icon" onClick={() => stop(project.id)}>
                       <SquareIcon />
                     </Button>
                   </IconTooltip>
                 </>
               ) : (
-                <IconTooltip label="Iniciar">
+                <IconTooltip label="Start">
                   <Button variant="ghost" size="icon" onClick={() => start(project.id)}>
                     <PlayIcon />
                   </Button>
                 </IconTooltip>
               )}
-              <IconTooltip label="Abrir en el editor">
+              <IconTooltip label="Open in editor">
                 <Button variant="ghost" size="icon" onClick={() => ipc.openInEditor(project.path)}>
                   <MonitorIcon />
                 </Button>
               </IconTooltip>
-              <IconTooltip label="Abrir en Finder">
+              <IconTooltip label="Open in Finder">
                 <Button variant="ghost" size="icon" onClick={() => revealItemInDir(project.path)}>
                   <FolderIcon />
                 </Button>
@@ -234,7 +234,7 @@ export function LogView({ projectId }: LogViewProps) {
             </>
           )}
           {openableUrl && (
-            <IconTooltip label="Copiar URL">
+            <IconTooltip label="Copy URL">
               <Button variant="ghost" size="icon" onClick={copyUrl}>
                 <ClipboardIcon />
               </Button>
@@ -250,7 +250,7 @@ export function LogView({ projectId }: LogViewProps) {
           onClick={scrollToBottom}
         >
           <ArrowDownIcon />
-          Seguir
+          Follow
         </Button>
       )}
     </div>

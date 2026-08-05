@@ -30,6 +30,14 @@ pub struct Project {
     /// soon as it's read at startup.
     #[serde(default)]
     pub was_running: bool,
+    /// User-chosen accent color (CSS color string), shown as a stripe next
+    /// to the project's name in the list. `None` means no accent.
+    #[serde(default)]
+    pub color: Option<String>,
+    /// Pinned projects sort above unpinned ones within their list (their
+    /// group's members, or the ungrouped section).
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +50,9 @@ pub struct Group {
     /// sequence, each waited on for readiness before the next begins.
     #[serde(default)]
     pub project_ids: Vec<String>,
+    /// Pinned groups sort above unpinned ones in the project list.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -147,10 +158,49 @@ impl ProjectStore {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.to_string(),
             project_ids: Vec::new(),
+            pinned: false,
         };
         guard.groups.push(group.clone());
         persist(&self.path, &guard)?;
         Ok(group)
+    }
+
+    pub fn toggle_project_pin(&self, id: &str) -> Result<Project, AppError> {
+        let mut guard = self.inner.lock().unwrap();
+        let project = guard
+            .projects
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or_else(|| {
+                AppError::new(
+                    MODULE,
+                    "STORE_PROJECT_NOT_FOUND",
+                    format!("Project not found: {id}"),
+                )
+            })?;
+        project.pinned = !project.pinned;
+        let updated = project.clone();
+        persist(&self.path, &guard)?;
+        Ok(updated)
+    }
+
+    pub fn toggle_group_pin(&self, id: &str) -> Result<Group, AppError> {
+        let mut guard = self.inner.lock().unwrap();
+        let group = guard
+            .groups
+            .iter_mut()
+            .find(|g| g.id == id)
+            .ok_or_else(|| {
+                AppError::new(
+                    MODULE,
+                    "STORE_GROUP_NOT_FOUND",
+                    format!("Group not found: {id}"),
+                )
+            })?;
+        group.pinned = !group.pinned;
+        let updated = group.clone();
+        persist(&self.path, &guard)?;
+        Ok(updated)
     }
 
     /// Keeps every group's `project_ids` in sync with which projects
@@ -238,7 +288,7 @@ fn read_from_disk(path: &PathBuf) -> Result<StoreData, AppError> {
         AppError::new(
             MODULE,
             "STORE_READ_FAILED",
-            format!("No se pudo leer projects.json: {e}"),
+            format!("Could not read projects.json: {e}"),
         )
     })?;
 
@@ -246,7 +296,7 @@ fn read_from_disk(path: &PathBuf) -> Result<StoreData, AppError> {
         AppError::new(
             MODULE,
             "STORE_PARSE_ERROR",
-            format!("projects.json está corrupto: {e}"),
+            format!("projects.json is corrupt: {e}"),
         )
     })
 }
@@ -260,7 +310,7 @@ fn persist(path: &PathBuf, data: &StoreData) -> Result<(), AppError> {
         AppError::new(
             MODULE,
             "STORE_WRITE_FAILED",
-            format!("No se pudo crear el directorio de datos: {e}"),
+            format!("Could not create the data directory: {e}"),
         )
     })?;
 
@@ -268,7 +318,7 @@ fn persist(path: &PathBuf, data: &StoreData) -> Result<(), AppError> {
         AppError::new(
             MODULE,
             "STORE_WRITE_FAILED",
-            format!("No se pudo serializar los proyectos: {e}"),
+            format!("Could not serialize projects: {e}"),
         )
     })?;
 
@@ -277,7 +327,7 @@ fn persist(path: &PathBuf, data: &StoreData) -> Result<(), AppError> {
         AppError::new(
             MODULE,
             "STORE_WRITE_FAILED",
-            format!("No se pudo escribir el archivo temporal: {e}"),
+            format!("Could not write the temp file: {e}"),
         )
     })?;
 
@@ -285,7 +335,7 @@ fn persist(path: &PathBuf, data: &StoreData) -> Result<(), AppError> {
         AppError::new(
             MODULE,
             "STORE_WRITE_FAILED",
-            format!("No se pudo confirmar la escritura de projects.json: {e}"),
+            format!("Could not commit the write to projects.json: {e}"),
         )
     })
 }
@@ -305,6 +355,8 @@ mod tests {
             auto_restart: false,
             group_id: None,
             was_running: false,
+            color: None,
+            pinned: false,
         }
     }
 
@@ -468,5 +520,39 @@ mod tests {
 
         // Consumed: a second call must come back empty.
         assert!(store.take_was_running().unwrap().is_empty());
+    }
+
+    #[test]
+    fn toggle_project_pin_flips_the_flag_and_persists_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+        let saved = store.save(blank_project("api")).unwrap();
+        assert!(!saved.pinned);
+
+        let pinned = store.toggle_project_pin(&saved.id).unwrap();
+        assert!(pinned.pinned);
+        assert!(store.get(&saved.id).unwrap().pinned);
+
+        let unpinned = store.toggle_project_pin(&saved.id).unwrap();
+        assert!(!unpinned.pinned);
+    }
+
+    #[test]
+    fn toggle_project_pin_on_an_unknown_id_returns_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+        assert!(store.toggle_project_pin("does-not-exist").is_err());
+    }
+
+    #[test]
+    fn toggle_group_pin_flips_the_flag_and_persists_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_at(&dir);
+        let group = store.find_or_create_group("backend").unwrap();
+        assert!(!group.pinned);
+
+        let pinned = store.toggle_group_pin(&group.id).unwrap();
+        assert!(pinned.pinned);
+        assert!(store.get_group(&group.id).unwrap().pinned);
     }
 }

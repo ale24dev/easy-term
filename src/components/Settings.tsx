@@ -73,7 +73,7 @@ export function Settings() {
         <div className="flex items-center gap-2">
           <Switch id="autostart" checked={autostart} onCheckedChange={toggleAutostart} />
           <Label htmlFor="autostart" className="text-foreground">
-            Iniciar con macOS
+            Start with macOS
           </Label>
         </div>
         <ThemeToggle />
@@ -81,7 +81,7 @@ export function Settings() {
 
       <div className="flex shrink-0 items-center gap-1.5">
         <Button variant="outline" size="sm" onClick={() => ipc.openLogsFolder()}>
-          Abrir carpeta de logs
+          Open logs folder
         </Button>
         <Button
           variant="outline"
@@ -89,9 +89,9 @@ export function Settings() {
           onClick={copyLastError}
           disabled={events.length === 0}
         >
-          {copied ? "Copiado" : "Copiar último error"}
+          {copied ? "Copied" : "Copy last error"}
         </Button>
-        <IconTooltip label="Actualizar">
+        <IconTooltip label="Refresh">
           <Button variant="ghost" size="icon" className="ml-auto" onClick={load}>
             <RefreshCwIcon />
           </Button>
@@ -99,10 +99,10 @@ export function Settings() {
       </div>
 
       {loading ? (
-        <p className="text-[12px] text-muted-foreground">Cargando…</p>
+        <p className="text-[12px] text-muted-foreground">Loading…</p>
       ) : events.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">
-          <p>Sin errores hoy.</p>
+          <p>No errors today.</p>
         </div>
       ) : (
         <ul className="scrollbar-thin flex flex-1 flex-col gap-1.5 overflow-y-auto">
@@ -139,7 +139,7 @@ export function Settings() {
         className={cn("shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10")}
         onClick={() => ipc.quitApp()}
       >
-        Salir de easy-term
+        Quit easy-term
       </Button>
     </div>
   );

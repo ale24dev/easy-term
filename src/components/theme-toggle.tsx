@@ -3,9 +3,9 @@ import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
 
 const OPTIONS = [
-  { value: "light", label: "Claro", icon: SunIcon },
-  { value: "dark", label: "Oscuro", icon: MoonIcon },
-  { value: "system", label: "Sistema", icon: MonitorIcon },
+  { value: "light", label: "Light", icon: SunIcon },
+  { value: "dark", label: "Dark", icon: MoonIcon },
+  { value: "system", label: "System", icon: MonitorIcon },
 ] as const;
 
 export function ThemeToggle() {

@@ -34,7 +34,7 @@ fn list_pids_on_port(port: u16) -> Result<Vec<i32>, AppError> {
             AppError::new(
                 MODULE,
                 "PORT_CHECK_FAILED",
-                format!("No se pudo ejecutar lsof: {e}"),
+                format!("Could not run lsof: {e}"),
             )
         })?;
 
@@ -104,7 +104,7 @@ pub fn kill_port_owner(port: u16) -> Result<(), AppError> {
                 return Err(AppError::new(
                     MODULE,
                     "PORT_KILL_OWNER_FAILED",
-                    format!("No se pudo matar el proceso {pid} en el puerto {port}: {err}"),
+                    format!("Could not kill process {pid} on port {port}: {err}"),
                 ));
             }
         }

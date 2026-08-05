@@ -50,9 +50,9 @@ export function writeChunk(id: string, chunk: string): void {
 }
 
 export function writeExitMarker(id: string, code: number, crashed: boolean): void {
-  const label = crashed ? `salió con código ${code}` : "detenido";
+  const label = crashed ? `exited with code ${code}` : "stopped";
   const color = crashed ? "\x1b[31m" : "\x1b[2m";
-  getTerminal(id).terminal.write(`\r\n${color}[proceso ${label}]\x1b[0m\r\n`);
+  getTerminal(id).terminal.write(`\r\n${color}[process ${label}]\x1b[0m\r\n`);
 }
 
 export function hydrateFromBuffer(id: string, buffer: string): void {

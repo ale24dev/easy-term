@@ -159,7 +159,7 @@ function App() {
         {view.kind === "list" ? (
           <>
             <span className="flex-1 truncate text-[13px] font-semibold">easy-term</span>
-            <IconTooltip label="Diagnóstico">
+            <IconTooltip label="Diagnostics">
               <Button
                 variant="ghost"
                 size="icon"
@@ -168,7 +168,7 @@ function App() {
                 <SlidersHorizontalIcon />
               </Button>
             </IconTooltip>
-            <IconTooltip label="Nuevo proyecto">
+            <IconTooltip label="New project">
               <Button
                 variant="ghost"
                 size="icon"
@@ -190,10 +190,10 @@ function App() {
             <span className="flex-1 truncate text-[13px] font-semibold">
               {view.kind === "form"
                 ? view.project
-                  ? "Editar proyecto"
-                  : "Nuevo proyecto"
+                  ? "Edit project"
+                  : "New project"
                 : view.kind === "settings"
-                  ? "Diagnóstico"
+                  ? "Diagnostics"
                   : activeProjectName}
             </span>
           </>

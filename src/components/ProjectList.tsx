@@ -3,6 +3,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   PencilIcon,
+  PinIcon,
   PlayIcon,
   RotateCwIcon,
   SquareIcon,
@@ -14,6 +15,7 @@ import { ipc, type PortOwner, type Project } from "../lib/ipc";
 import { PortConflictDialog } from "./PortConflictDialog";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { Checkbox } from "./ui/checkbox";
 import { IconTooltip } from "./ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -39,27 +41,55 @@ const STATUS_DOT: Record<string, string> = {
   stopped: "bg-status-stopped",
 };
 
+// Pinned projects/groups float to the top of their own list — stable sort
+// keeps everything else in its existing relative order.
+function sortPinnedFirst<T extends { pinned: boolean }>(items: T[]): T[] {
+  return [...items].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+}
+
 interface ProjectRowProps {
   project: Project;
   onEdit: (project: Project) => void;
   onOpenLogs: (id: string) => void;
   onStart: (project: Project) => void;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
 }
 
-function ProjectRow({ project, onEdit, onOpenLogs, onStart }: ProjectRowProps) {
+function ProjectRow({
+  project,
+  onEdit,
+  onOpenLogs,
+  onStart,
+  selected,
+  onToggleSelect,
+}: ProjectRowProps) {
   const { status, errorCount, restartInfo, cpuPercent, memoryBytes } = getRuntime(project.id);
   const stop = useProjectsStore((s) => s.stop);
   const restart = useProjectsStore((s) => s.restart);
   const deleteProject = useProjectsStore((s) => s.deleteProject);
+  const togglePin = useProjectsStore((s) => s.togglePin);
   const isActive = status === "running" || status === "starting";
   const isAutoRestarting = status === "crashed" && restartInfo !== null;
 
   return (
     <li className="group flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-accent/60">
+      <Checkbox
+        checked={selected}
+        onCheckedChange={() => onToggleSelect(project.id)}
+        className="shrink-0"
+        aria-label={`Select ${project.name}`}
+      />
       <button
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
         onClick={() => onOpenLogs(project.id)}
       >
+        {project.color && (
+          <span
+            className="h-4 w-1 shrink-0 rounded-full"
+            style={{ backgroundColor: project.color }}
+          />
+        )}
         <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[status])} />
         <span className="truncate text-[12px]">{project.name}</span>
         {project.port !== null && (
@@ -79,42 +109,57 @@ function ProjectRow({ project, onEdit, onOpenLogs, onStart }: ProjectRowProps) {
       </button>
 
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 has-[[data-state=open]]:opacity-100">
+        <IconTooltip label={project.pinned ? "Unpin" : "Pin"}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(project.pinned && "text-foreground")}
+            onClick={() => togglePin(project.id)}
+          >
+            <PinIcon className={cn(project.pinned && "fill-current")} />
+          </Button>
+        </IconTooltip>
         {isActive ? (
           <>
-            <IconTooltip label="Reiniciar">
+            <IconTooltip label="Restart">
               <Button variant="ghost" size="icon" onClick={() => restart(project.id)}>
                 <RotateCwIcon />
               </Button>
             </IconTooltip>
-            <IconTooltip label="Detener">
+            <IconTooltip label="Stop">
               <Button variant="ghost" size="icon" onClick={() => stop(project.id)}>
                 <SquareIcon />
               </Button>
             </IconTooltip>
           </>
         ) : isAutoRestarting ? (
-          <IconTooltip label="Cancelar reintento automático">
+          <IconTooltip label="Cancel automatic retry">
             <Button variant="ghost" size="icon" onClick={() => stop(project.id)}>
               <XIcon />
             </Button>
           </IconTooltip>
         ) : (
-          <IconTooltip label="Iniciar">
-            <Button variant="ghost" size="icon" onClick={() => onStart(project)}>
+          <IconTooltip label="Start">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-status-running hover:text-status-running"
+              onClick={() => onStart(project)}
+            >
               <PlayIcon />
             </Button>
           </IconTooltip>
         )}
-        <IconTooltip label="Editar">
+        <IconTooltip label="Edit">
           <Button variant="ghost" size="icon" onClick={() => onEdit(project)}>
             <PencilIcon />
           </Button>
         </IconTooltip>
-        <IconTooltip label="Eliminar">
+        <IconTooltip label="Delete">
           <Button
             variant="ghost"
             size="icon"
-            className="hover:bg-destructive/10 hover:text-destructive"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={() => deleteProject(project.id)}
           >
             <Trash2Icon />
@@ -128,37 +173,67 @@ function ProjectRow({ project, onEdit, onOpenLogs, onStart }: ProjectRowProps) {
 interface GroupSectionProps {
   id: string;
   name: string;
+  pinned: boolean;
   projects: Project[];
   onEdit: (project: Project) => void;
   onOpenLogs: (id: string) => void;
   onStart: (project: Project) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onToggleSelectMany: (ids: string[], select: boolean) => void;
 }
 
-function GroupSection({ id, name, projects, onEdit, onOpenLogs, onStart }: GroupSectionProps) {
+function GroupSection({
+  id,
+  name,
+  pinned,
+  projects,
+  onEdit,
+  onOpenLogs,
+  onStart,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectMany,
+}: GroupSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const startGroup = useProjectsStore((s) => s.startGroup);
-  const stopGroup = useProjectsStore((s) => s.stopGroup);
+  const toggleGroupPin = useProjectsStore((s) => s.toggleGroupPin);
+
+  const memberIds = projects.map((p) => p.id);
+  const selectedCount = memberIds.filter((id) => selectedIds.has(id)).length;
+  const allSelected = memberIds.length > 0 && selectedCount === memberIds.length;
+  const someSelected = selectedCount > 0 && !allSelected;
 
   return (
     <li className="mb-1">
       <div className="flex items-center justify-between px-2 py-1">
-        <button
-          className="flex items-center gap-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
-          onClick={() => setCollapsed((c) => !c)}
-        >
-          {collapsed ? <ChevronRightIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
-          {name}
-        </button>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="text-[10px]" onClick={() => startGroup(id)}>
-            <PlayIcon className="size-3" />
-            Todos
-          </Button>
-          <Button variant="ghost" size="sm" className="text-[10px]" onClick={() => stopGroup(id)}>
-            <SquareIcon className="size-3" />
-            Todos
-          </Button>
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            checked={allSelected ? true : someSelected ? "indeterminate" : false}
+            onCheckedChange={() => onToggleSelectMany(memberIds, !allSelected)}
+            aria-label={`Select all in ${name}`}
+          />
+          <button
+            className="flex items-center gap-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            {collapsed ? (
+              <ChevronRightIcon className="size-3" />
+            ) : (
+              <ChevronDownIcon className="size-3" />
+            )}
+            {name}
+          </button>
         </div>
+        <IconTooltip label={pinned ? "Unpin group" : "Pin group"}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("size-6", pinned && "text-foreground")}
+            onClick={() => toggleGroupPin(id)}
+          >
+            <PinIcon className={cn("size-3", pinned && "fill-current")} />
+          </Button>
+        </IconTooltip>
       </div>
       {!collapsed && (
         <ul className="flex flex-col">
@@ -169,6 +244,8 @@ function GroupSection({ id, name, projects, onEdit, onOpenLogs, onStart }: Group
               onEdit={onEdit}
               onOpenLogs={onOpenLogs}
               onStart={onStart}
+              selected={selectedIds.has(project.id)}
+              onToggleSelect={onToggleSelect}
             />
           ))}
         </ul>
@@ -183,9 +260,39 @@ export function ProjectList({ onEdit, onOpenLogs }: ProjectListProps) {
   // Subscribed so status-dot/badge updates trigger a re-render for every row.
   useProjectsStore((s) => s.runtime);
   const start = useProjectsStore((s) => s.start);
+  const stop = useProjectsStore((s) => s.stop);
+  const deleteProject = useProjectsStore((s) => s.deleteProject);
 
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [resolving, setResolving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectMany(ids: string[], select: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (select) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
 
   async function handleStart(project: Project) {
     if (project.port !== null) {
@@ -219,25 +326,52 @@ export function ProjectList({ onEdit, onOpenLogs }: ProjectListProps) {
     }
   }
 
+  async function handleBulkStart() {
+    const targets = projects.filter((p) => selectedIds.has(p.id));
+    clearSelection();
+    for (const project of targets) {
+      await handleStart(project);
+    }
+  }
+
+  async function handleBulkStop() {
+    const ids = [...selectedIds];
+    clearSelection();
+    for (const id of ids) {
+      await stop(id);
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = [...selectedIds];
+    clearSelection();
+    for (const id of ids) {
+      await deleteProject(id);
+    }
+  }
+
   if (projects.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center text-muted-foreground">
-        <p className="text-[13px]">No hay proyectos todavía.</p>
-        <p className="text-[11px] text-muted-foreground/70">Agrega uno para empezar.</p>
+        <p className="text-[13px]">No projects yet.</p>
+        <p className="text-[11px] text-muted-foreground/70">Add one to get started.</p>
       </div>
     );
   }
 
   const groupedIds = new Set(groups.flatMap((g) => g.projectIds));
-  const ungrouped = projects.filter((p) => !groupedIds.has(p.id));
+  const ungrouped = sortPinnedFirst(projects.filter((p) => !groupedIds.has(p.id)));
+  const sortedGroups = sortPinnedFirst(groups);
 
   return (
     <>
       <ul className="scrollbar-thin flex-1 overflow-y-auto p-1">
-        {groups.map((group) => {
-          const members = group.projectIds
-            .map((id) => projects.find((p) => p.id === id))
-            .filter((p): p is Project => p !== undefined);
+        {sortedGroups.map((group) => {
+          const members = sortPinnedFirst(
+            group.projectIds
+              .map((id) => projects.find((p) => p.id === id))
+              .filter((p): p is Project => p !== undefined),
+          );
           if (members.length === 0) return null;
 
           return (
@@ -245,10 +379,14 @@ export function ProjectList({ onEdit, onOpenLogs }: ProjectListProps) {
               key={group.id}
               id={group.id}
               name={group.name}
+              pinned={group.pinned}
               projects={members}
               onEdit={onEdit}
               onOpenLogs={onOpenLogs}
               onStart={handleStart}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
+              onToggleSelectMany={toggleSelectMany}
             />
           );
         })}
@@ -260,9 +398,44 @@ export function ProjectList({ onEdit, onOpenLogs }: ProjectListProps) {
             onEdit={onEdit}
             onOpenLogs={onOpenLogs}
             onStart={handleStart}
+            selected={selectedIds.has(project.id)}
+            onToggleSelect={toggleSelect}
           />
         ))}
       </ul>
+
+      {selectedIds.size > 0 && (
+        <div className="flex shrink-0 items-center gap-1.5 border-t border-border px-2.5 py-1.5">
+          <span className="text-[11px] text-muted-foreground">{selectedIds.size} selected</span>
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-status-running hover:text-status-running"
+              onClick={handleBulkStart}
+            >
+              <PlayIcon className="size-3" />
+              Start
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleBulkStop}>
+              <SquareIcon className="size-3" />
+              Stop
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={handleBulkDelete}
+            >
+              <Trash2Icon className="size-3" />
+              Delete
+            </Button>
+            <Button variant="ghost" size="icon" className="size-6" onClick={clearSelection}>
+              <XIcon className="size-3" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {conflict && (
         <PortConflictDialog

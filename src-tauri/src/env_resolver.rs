@@ -23,7 +23,7 @@ pub fn init() {
             Source::Backend,
             MODULE,
             "ENV_SHELL_RESOLVE_FAILED",
-            "No se pudo resolver el PATH del login shell; se usará el PATH del proceso actual",
+            "Could not resolve the login shell's PATH; falling back to the current process's PATH",
             None,
             None,
         );
