@@ -1,9 +1,12 @@
 name: CI
 
+# Automatic triggers (push/pull_request) are disabled for now: this repo's
+# macOS Actions minutes ran out (macOS runners cost 10x), so pull_request
+# and push events were queuing but never getting a runner. Re-add them once
+# minutes are available again — workflow_dispatch keeps a manual run working
+# in the meantime.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   check:
