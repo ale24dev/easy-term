@@ -1,0 +1,86 @@
+name: CI
+
+# Automatic triggers (push/pull_request) are disabled for now: this repo's
+# macOS Actions minutes ran out (macOS runners cost 10x), so pull_request
+# and push events were queuing but never getting a runner. Re-add them once
+# minutes are available again — workflow_dispatch keeps a manual run working
+# in the meantime.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check frontend
+        run: pnpm exec tsc --noEmit
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Check Rust code
+        working-directory: src-tauri
+        run: cargo check
+
+      - name: Run frontend tests
+        run: pnpm test
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+  macos-e2e:
+    needs: check
+    runs-on: macos-latest
+    # This suite drives the real compiled .app through System Events —
+    # unlike the (fast, deterministic) checks above, it's brand new and has
+    # never run outside this workflow. Non-blocking until a green run
+    # confirms the AppleScript selectors hold up on an actual macOS runner;
+    # flip this to blocking once that's confirmed. See e2e/macos/README.md.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run macOS UI E2E suite
+        run: ./e2e/macos/run.sh

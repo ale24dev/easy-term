@@ -1,0 +1,54 @@
+[package]
+name = "easy-term"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "easy_term_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-positioner = { version = "2.3.3", features = ["tray-icon"] }
+portable-pty = "0.9.0"
+libc = "0.2.189"
+chrono = { version = "0.4.45", features = ["clock"] }
+uuid = { version = "1.24.0", features = ["v4"] }
+tauri-plugin-dialog = "2.7.2"
+regex = "1.13.1"
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-global-shortcut = "2.3.2"
+tauri-plugin-autostart = "2.5.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSResponder", "NSApplication"] }
+# Branch v2 = Tauri v2, the same branch the canonical menubar example
+# (ahkohd/tauri-macos-menubar-app-example, v2-popover) builds against.
+# Cargo.lock pins the exact commit.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+# The old `objc` crate's macros (used via tauri-nspanel: msg_send!, class!,
+# panel_delegate!) expand a `cfg(feature = "cargo-clippy")` into this crate,
+# tripping `unexpected_cfgs`. The lint fires during macro expansion, before
+# module-scoped allows apply, so the fix is declaring the value as expected
+# here — the approach the lint's own documentation recommends. Genuinely
+# unexpected cfgs still warn.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }

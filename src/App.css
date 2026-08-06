@@ -1,0 +1,176 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Tailwind's default dark strategy is `prefers-color-scheme`; we toggle a
+   `.dark` class on <html> instead (see theme-provider.tsx) so "system",
+   "light", and "dark" can all be explicit, persisted choices. */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+
+  /* Project status — deliberately constant across light/dark: these are
+     status signals (running/starting/crashed/stopped), not decorative
+     accents, so they shouldn't shift with the theme. */
+  --status-running: oklch(0.72 0.19 149);
+  --status-starting: oklch(0.79 0.17 82);
+  --status-crashed: oklch(0.65 0.24 27);
+  --status-stopped: oklch(0.65 0 0);
+}
+
+.dark {
+  /* Matches the row hover tone (--accent at 60% over the old near-black
+     background) — the user pointed at that hover shade and asked for it
+     as the base background. The two earlier custom-background rounds
+     (navy, then warm brown) that "never landed" were actually invisible
+     for an unrelated reason: see the canvas-propagation note on #root
+     below — a body background painted the corners solid regardless of
+     what color it was, masking any of those attempts either way. */
+  --background: oklch(0.22 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-status-running: var(--status-running);
+  --color-status-starting: var(--status-starting);
+  --color-status-crashed: var(--status-crashed);
+  --color-status-stopped: var(--status-stopped);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: -apple-system, "SF Pro Text", Inter, Avenir, Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  /* A `body` background paints the whole canvas/viewport per the CSS
+     spec (it propagates up when `html` has none of its own) — which
+     bypasses `body`'s own border-radius/overflow entirely. That's why the
+     "rounded window" corners were actually getting filled in solid: the
+     rounded clip on `body` was never clipping `body`'s own background in
+     the first place. Keeping html/body transparent and putting the actual
+     opaque, rounded shell on `#root` (a plain child div, so no canvas
+     propagation) is what makes the window read as truly rounded over the
+     transparent NSWindow (tauri.conf.json). rounded-xl (not a bare
+     var()) because --radius-xl only exists inlined into generated
+     utilities, not as its own custom property, under Tailwind v4's
+     `@theme inline`. */
+  html,
+  body {
+    background: transparent;
+  }
+
+  #root {
+    @apply rounded-xl bg-background text-foreground font-sans text-[13px] antialiased;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+@layer utilities {
+  /* Thin, unobtrusive scrollbar for the list/log panes — visible on hover
+     only, matching the restrained chrome a menu-bar popover wants. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .scrollbar-thin:hover {
+    scrollbar-color: var(--color-border) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 8px;
+  }
+
+  .scrollbar-thin:hover::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+  }
+}
+
+/* xterm.js sizes its own canvas from this host — Tailwind utility classes
+   handle everything else about the log view. */
+.terminal-host {
+  height: 100%;
+  width: 100%;
+}

@@ -144,69 +144,442 @@ la config persiste a JSON con escritura atómica (write-to-temp + rename).
 
 ## 5. Fases de implementación
 
-### Fase 0 — Scaffold (½ día)
-- [ ] `pnpm create tauri-app` (React + TS + Vite), Tauri v2.
-- [ ] Configurar tray icon + `tauri-plugin-positioner`, ventana popover anclada, hide on blur.
-- [ ] `ActivationPolicy::Accessory` (solo menu bar, sin Dock).
-- [ ] CI básico: `cargo check` + `tsc --noEmit` + `cargo fmt --check` en GitHub Actions.
+### Fase 0 — Scaffold (½ día) ✅ completada
+- [x] `pnpm create tauri-app` (React + TS + Vite), Tauri v2.
+- [x] Configurar tray icon + `tauri-plugin-positioner`, ventana popover anclada, hide on blur.
+- [x] `ActivationPolicy::Accessory` (solo menu bar, sin Dock).
+- [x] CI básico: `cargo check` + `tsc --noEmit` + `cargo fmt --check` en GitHub Actions.
 
 **Criterio de salida:** icono en el menu bar que abre/cierra un popover vacío.
 
-### Fase 1 — Core MVP (3–5 días)
+### Fase 1 — Core MVP (3–5 días) ✅ completada
 El objetivo: *usarla a diario reemplaza al menos una terminal*.
 
-- [ ] **1.1 Modelo + persistencia**: `project_store` con CRUD y JSON atómico.
-- [ ] **1.2 Formulario de proyecto**: picker de carpeta nativo (dialog de Tauri), nombre,
-      comando, puerto, env vars.
-- [ ] **1.3 `env_resolver`**: PATH real del login shell, cacheado al arranque.
-- [ ] **1.4 `process_manager`**: start/stop/restart sobre `portable-pty`, process groups,
-      reader-thread por proceso, eventos `process:*`.
-- [ ] **1.5 LogView con xterm.js**: colores ANSI, autoscroll con pausa al scrollear arriba
-      (botón "↓ seguir" para volver), fit addon.
-- [ ] **1.6 Lista de proyectos**: estado con dot de color, botones start/stop/restart,
+- [x] **1.1 Modelo + persistencia**: `project_store` con CRUD y JSON atómico
+      (write-to-temp + rename) en `~/Library/Application Support/easy-term/projects.json`.
+- [x] **1.2 Formulario de proyecto**: picker de carpeta nativo (`tauri-plugin-dialog`), nombre,
+      comando, puerto, env vars (filas clave/valor).
+- [x] **1.3 `env_resolver`**: PATH real del login shell, cacheado al arranque.
+- [x] **1.4 `process_manager`**: start/stop/restart sobre `portable-pty`, process groups
+      (`setsid` + `killpg` SIGTERM→SIGKILL con timeout de 3s), reader/batcher/waiter threads
+      por proceso, eventos `process:status|output|exit|url-detected`, ring buffer de 1MB.
+- [x] **1.5 LogView con xterm.js**: colores ANSI, autoscroll con pausa al scrollear arriba
+      y botón "↓ seguir" para volver, fit addon, instancias persistentes por proyecto
+      (`lib/terminals.ts`).
+- [x] **1.6 Lista de proyectos**: estado con dot de color, botones start/stop/restart,
       click → ver logs.
-- [ ] **1.7 Estados y exits**: distinguir exit limpio vs crash; badge "crashed".
+- [x] **1.7 Estados y exits**: distinguir exit limpio vs crash; marcador de color en el
+      propio log al terminar el proceso.
+- [x] **1.8 `error_logger` (base)**: tipo `AppError` con códigos, writer JSONL con canal
+      mpsc, panic hook, rotación/retención, dedupe de errores repetidos, captura global
+      en frontend + comando `log_app_error` (ver sección 7).
 
-**Criterio de salida:** agrego mi proyecto, `pnpm run dev` corre con colores, veo logs,
-paro y no quedan zombis (`lsof -i :PUERTO` limpio).
+**Criterio de salida:** ✅ verificado end-to-end (Linux, vía Xvfb + xdotool, ya que esta
+sesión no tiene acceso a macOS): se crea un proyecto con el folder picker nativo, se persiste
+en `projects.json`, `sh run.sh` corre en un PTY real con colores/output en vivo en xterm.js,
+la URL `http://localhost:5173` se detecta, y al detener el proyecto el proceso se mata
+limpiamente sin dejar zombis (`ps aux` confirmado). Cero eventos en el log de diagnóstico
+durante la prueba. Pendiente de validar en macOS real: posicionamiento del popover respecto
+al tray, `ActivationPolicy::Accessory`, y el picker de carpetas nativo (NSOpenPanel).
 
-### Fase 2 — Los features que justifican la app (3–4 días)
-- [ ] **2.1 Detección automática** (`script_detector`): al escoger carpeta, parsear
+### Fase 2 — Los features que justifican la app (3–4 días) ✅ completada
+- [x] **2.1 Detección automática** (`script_detector`): al escoger carpeta, parsear
       `package.json` → dropdown de scripts; package manager por lockfile
       (`pnpm-lock.yaml` → pnpm, `bun.lockb`/`bun.lock` → bun, `yarn.lock` → yarn,
-      `package-lock.json` → npm). Pre-rellenar nombre con el de `package.json`.
-- [ ] **2.2 Gestión de puertos** (`port_checker`): check pre-start; si ocupado, dialog con
-      el proceso dueño (nombre + PID) y opción "matar y levantar". Resuelve `EADDRINUSE`
-      en un click.
-- [ ] **2.3 Tray con estado**: icono con dot verde (todo corre) / rojo (algo crasheó) +
-      título con contador de procesos activos. Menú contextual del tray: lista de proyectos
-      con start/stop directo + Quit.
-- [ ] **2.4 Abrir en navegador**: botón con la URL; regex sobre logs para detectar la URL
-      real que imprime el dev server (`process:url-detected`) — cubre el caso de Vite
-      saltando de puerto.
-- [ ] **2.5 Búsqueda en logs**: `@xterm/addon-search` con barra de búsqueda (⌘F dentro del popover).
-- [ ] **2.6 Notificaciones nativas de crash**: `tauri-plugin-notification`; click en la
-      notificación → abre el popover en los logs de ese proyecto.
-- [ ] **2.7 Highlight de errores**: contador de líneas `error|warn` (regex sobre el stream)
-      → badge numérico por proyecto, se resetea al ver los logs.
+      `package-lock.json` → npm). Pre-rellena nombre con el de `package.json`.
+- [x] **2.2 Gestión de puertos** (`port_checker`): check pre-start vía `lsof`; si ocupado,
+      dialog con el proceso dueño (nombre + PID) y opción "Liberar y continuar"
+      (SIGTERM→SIGKILL). Resuelve `EADDRINUSE` en un click.
+- [x] **2.3 Tray con estado**: título del tray con dot verde (🟢 N corriendo) / rojo
+      (🔴 algo crasheó). Menú contextual con un item por proyecto (start/stop directo,
+      glyph de estado) + Quit, se reconstruye reactivamente en cada cambio de estado o
+      de lista de proyectos.
+- [x] **2.4 Abrir en navegador**: botón en LogView con la URL detectada (o
+      `http://localhost:{puerto}` como fallback) vía `process:url-detected`.
+- [x] **2.5 Búsqueda en logs**: `@xterm/addon-search` con barra de búsqueda (Cmd/Ctrl+F),
+      next/prev, Esc para cerrar.
+- [x] **2.6 Notificaciones nativas de crash**: `tauri-plugin-notification`; el id del
+      proyecto viaja en el campo `extra` de la notificación, un listener `onAction` en el
+      frontend salta directo a los logs de ese proyecto al hacer click.
+- [x] **2.7 Highlight de errores**: contador de líneas `error|warn` (regex sobre el
+      stream) → badge numérico en `ProjectList`, se resetea al abrir los logs.
+- [x] **2.8 Diagnóstico — dedupe y visor**: dedupe de errores repetidos ya en el
+      `error_logger` base (Fase 1); panel Settings → Diagnóstico con visor de eventos,
+      "Abrir carpeta de logs" y "Copiar último error".
+
+**Validado end-to-end en Linux** (Xvfb + xdotool + dunst, sin acceso a macOS en esta
+sesión): detección de scripts desde un `package.json` real (nombre y comando
+pre-rellenados correctamente), diálogo de conflicto de puerto identificando el proceso
+dueño real y liberándolo antes de arrancar, badge de errores incrementando en vivo con
+reset al abrir logs, botón "Abrir en navegador" con la URL detectada, búsqueda en logs
+resaltando coincidencias y haciendo scroll automático, panel de diagnóstico mostrando
+"sin errores" tras toda la sesión de pruebas (cero errores internos logueados). Pendiente
+de validar en macOS real: aspecto del ícono/título del tray nativo y el comportamiento
+de click-through de las notificaciones (macOS puede diferir del mecanismo Linux/dbus
+usado aquí para probar `onAction`).
 
 **Criterio de salida:** configurar un proyecto nuevo son 2 clicks; un puerto ocupado se
 resuelve desde la app; me entero de un crash sin mirar la app.
 
-### Fase 3 — Power features (4–6 días)
-- [ ] **3.1 Grupos/workspaces**: entidad `Group`, "levantar todo" en orden secuencial con
-      espera simple entre arranques (readiness: puerto abierto o timeout). UI: sección
-      colapsable por grupo con botón start/stop grupal.
-- [ ] **3.2 Auto-restart on crash**: opt-in por proyecto; backoff exponencial (1s, 2s, 4s...
-      máx 30s) y límite de N intentos para no ciclar; badge "restarting (2/5)".
-- [ ] **3.3 Atajo global** (`tauri-plugin-global-shortcut`): `⌥+Space` (configurable)
-      muestra/oculta el popover, estilo Raycast.
-- [ ] **3.4 Acciones rápidas por proyecto**: abrir en VS Code/Cursor (`code .`/`cursor .`
-      con detección de cuál hay instalado), abrir en Finder, copiar URL.
-- [ ] **3.5 Monitor de recursos**: CPU/RAM por process-tree vía `sysinfo`, polling 2s solo
-      con el popover abierto; mini sparkline o texto junto a cada proyecto.
-- [ ] **3.6 Launch at login** (`tauri-plugin-autostart`) + restaurar proyectos que estaban
-      corriendo al cerrar (flag `wasRunning` persistido).
+### Fase 3 — Power features (4–6 días) ✅ completada
+- [x] **3.1 Grupos/workspaces**: entidad `Group` (persistida junto a `Project` en el mismo
+      archivo), "levantar todo" en orden secuencial con espera de readiness (puerto abierto,
+      poll cada 300ms, timeout de 8s; sin puerto → espera fija de 2s). UI: sección colapsable
+      por grupo con botones start/stop grupal; el campo "Grupo" del formulario resuelve o
+      crea el grupo por nombre.
+- [x] **3.2 Auto-restart on crash**: checkbox `autoRestart` por proyecto; backoff exponencial
+      (1s→2s→4s→8s→16s, cap 30s) con límite de 5 intentos; cancelación vía "epoch" al hacer
+      stop explícito (manual, restart, o delete); reset del contador solo si el proceso
+      sobrevivió ≥5s (ver nota de bug abajo). Badge "reintentando N/5" en la lista, con botón
+      "✕ Cancelar" mientras hay un reintento pendiente.
+- [x] **3.3 Atajo global** (`tauri-plugin-global-shortcut`): `Alt+Space` muestra/oculta el
+      popover, mismo path que el click izquierdo del tray.
+- [x] **3.4 Acciones rápidas por proyecto**: abrir en editor (`open_in_editor` prueba
+      `cursor` y luego `code` vía PATH resuelto), abrir en Finder (`revealItemInDir`),
+      copiar URL — los tres como botones en `LogView`.
+- [x] **3.5 Monitor de recursos**: en vez de `sysinfo`, se optó por `ps -Ao pgid,pcpu,rss`
+      sumado por process-group (mismo enfoque que `port_checker`/`lsof`, sin dependencias
+      nuevas) — verificado que `pid == pgid` se cumple por el `setsid` de `portable-pty`.
+      Polling cada 2s desde el frontend, activo solo mientras la ventana tiene foco
+      (`onFocusChanged`).
+- [x] **3.6 Launch at login** (`tauri-plugin-autostart`, toggle en Settings) + restaurar
+      proyectos: flag `wasRunning` por proyecto, marcado al hacer Quit (snapshot de
+      proyectos en `running`/`starting`) y consumido una sola vez al arrancar.
+
+**Bug encontrado y corregido durante el testing E2E:** `start()` emitía `Running`
+inmediatamente al spawnear el proceso (antes de saber si sobrevivía), y `emit_status`
+reseteaba el contador de reintentos a 0 en cada `Running` — con un comando que crashea en
+milisegundos, esto hacía que el contador nunca superara 1 y el backoff se quedara fijo en
+~1s para siempre, sin llegar nunca al límite de 5 intentos (loop infinito). Se corrigió
+reemplazando el reset-on-Running por un reset condicionado a que el proceso haya vivido al
+menos `MIN_UPTIME_FOR_RESTART_RESET` (5s) antes de crashear — un proceso que crashea rápido
+sigue acumulando en la misma racha de backoff; uno que corrió un buen rato antes de morir
+empieza una racha nueva. Verificado con un proyecto que crashea al instante: deltas reales
+entre crashes de 1.01s, 2.01s, 4.01s, 8.01s, 16.01s y luego `PROC_RESTART_LIMIT_REACHED`
+una sola vez, sin más reintentos.
+
+**Validado end-to-end en Linux** (Xvfb + xdotool): grupo de 2 proyectos con start-all
+secuencial (readiness por puerto real vía `python3 -m http.server`) y stop-all concurrente
+sin procesos huérfanos; auto-restart con backoff exponencial real hasta agotar los 5
+intentos; notificación nativa de crash disparándose correctamente bajo Xvfb; cálculo de
+CPU/RAM verificado contra el `ps` real del proceso corriendo. Pendiente de confirmar en
+macOS real: el atajo global `Alt+Space` (no testeable de forma confiable vía X11 synthetic
+events) y el comportamiento exacto de `tauri-plugin-autostart` (macOS usa LaunchAgents).
+
+**Bug reportado en macOS real (post-Fase 3): click en el tray solo mostraba "Quit".**
+El tray (2.3) adjuntaba un menú nativo vía `tray.set_menu()` para el status agregado y el
+toggle rápido de proyectos. En macOS, `NSStatusItem.setMenu()` hace que AppKit muestre ese
+menú en **todo** click —izquierdo incluido— sin importar `show_menu_on_left_click`; es un bug
+conocido y no resuelto de Tauri (tauri-apps/tauri#4002), no reproducible en Linux porque el
+backend de tray ahí es GTK, arquitectónicamente distinto. Con el menú adjunto, el click
+izquierdo dejó de abrir el popover del todo. Corregido eliminando por completo el menú nativo
+del tray: el título/tooltip del tray (`tray.rs`) sigue reflejando el estado agregado y
+por-proyecto (glyphs `🟢/🟡/🔴/⚪` en el tooltip al hacer hover), pero "Salir" se movió a un
+botón dentro de Settings y el toggle por-proyecto vive únicamente en la lista del popover.
+Verificado en Linux (sin regresión en el código Rust compartido) y confirmado el flujo
+completo del nuevo comando `quit_app` end-to-end (snapshot de `wasRunning` + `app.exit(0)`).
+
+**Bug reportado en macOS real: el selector de carpeta se abría y se cerraba solo.**
+Mismo patrón que el bug anterior, distinta puerta de entrada: el handler de `Focused(false)`
+en `lib.rs` oculta la ventana del popover al perder foco (para que se comporte como un
+popover normal). El picker de carpeta (`@tauri-apps/plugin-dialog`, botón "Elegir…" en
+`ProjectForm`) se presenta en macOS como una *sheet* adjunta a esa ventana — abrirlo le quita
+el foco a la ventana, disparando el hide, y ocultar la ventana se lleva puesta a su propia
+sheet, que se cierra de inmediato. Corregido con un flag (`SuppressAutoHide`, `AtomicBool` en
+el estado de la app) que el frontend activa justo antes de invocar `open()` y desactiva al
+resolver la promesa (comandos `begin_native_dialog`/`end_native_dialog`); el handler de blur
+respeta el flag y no oculta la ventana mientras el diálogo está abierto. Verificado en Linux
+que el flujo IPC no rompe nada (el picker ahí es GTK vía portal, no reproduce el bug de sheet
+en sí, pero confirma que no hay regresión): seleccionar carpeta completa `path`/`name`/
+detección de scripts con normalidad. Pendiente confirmar en macOS real que el picker ya no se
+cierra solo.
+
+### Fase 3.7 — Suite de pruebas en capas
+
+Hasta acá, todo el testing había sido manual (Xvfb + xdotool en el sandbox Linux, más
+verificación puntual en macOS real para los dos bugs de arriba) — cero tests automatizados,
+y el CI solo corría `tsc --noEmit` + `cargo fmt/check`. A raíz del segundo bug de macOS real
+(picker de carpeta), se armó una suite en tres capas, cada una con un propósito distinto:
+
+- [x] **Rust (`cargo test`, 41 tests)**: unitarios/integración para toda la lógica de negocio
+      que no depende de un `AppHandle` real — `project_store` (CRUD, persistencia atómica,
+      grupos, `wasRunning`), `script_detector` (detección de package manager, parseo de
+      scripts), `port_checker` (contra un listener real vía `python3 -m http.server`, no
+      mocks), `env_resolver` (resolución de PATH vía shell), y de `process_manager` el backoff
+      exponencial + detección de URL + conteo de líneas de error (extraídos a funciones puras)
+      más un smoke test directo sobre `portable-pty` que valida los supuestos de
+      setsid/process-group que `start()`/`stop()` dan por sentado. `store_path` en
+      `project_store` se inyectó (antes era un global fijo a `~/Library/Application Support`)
+      para poder apuntar los tests a un tempdir sin tocar datos reales.
+- [x] **Frontend (`pnpm test`, Vitest, 16 tests)**: el store de Zustand (`stores/projects.ts`)
+      con `ipc` mockeado — altas/ediciones in-place, que ningún método propague un error de
+      ipc, y que los setters de runtime mergeen en vez de reemplazar.
+- [x] **macOS UI E2E (`e2e/macos/`, AppleScript vía System Events)**: la única capa que
+      realmente ejercita AppKit — las dos capas anteriores corren en Linux y por diseño no
+      hubieran detectado ninguno de los dos bugs reales de esta fase (ambos específicos de
+      AppKit). `tauri-driver`/WebDriver, la herramienta que Tauri recomienda para E2E, **no
+      soporta macOS** (solo Linux/Windows), así que esta capa maneja la app compilada
+      directamente por accesibilidad: clic en el ícono del tray, click en botones por su texto
+      accesible (`name`/`help`/`description`, ya que los botones de ícono usan `title=` en vez
+      de texto visible), "Ir a la carpeta" (⌘⇧G) para el picker nativo. Cuatro flujos:
+      `01_tray_toggle` y `02_folder_picker` son regresión directa de los dos bugs recién
+      corregidos; `03_project_crud` es el happy path (crear/iniciar/detener/eliminar, con un
+      `sleep 30` en vez de un dev server real para no depender de pnpm/red); `04_quit` valida
+      que "Salir de easy-term" mata el proceso de verdad.
+
+**Nota de confianza sobre la capa E2E de macOS**: se escribió sin acceso a una Mac real para
+correrla — los selectores de accesibilidad siguen convenciones documentadas pero no están
+verificados contra una corrida real. Por eso el job `macos-e2e` en CI está con
+`continue-on-error: true`: corre en cada push/PR contra `macos-latest`, pero no bloquea el
+merge todavía. Una vez que una corrida real confirme que los selectores funcionan (o se
+ajusten los que no), sacar el `continue-on-error` para que sí bloquee. `check` (tsc, fmt,
+clippy-equivalente, `cargo test`, `pnpm test`) sí es bloqueante desde ya — esa capa se corrió
+y se verificó en este sandbox.
+
+### Fase 3.8 — Rediseño de UI (Tailwind + shadcn/ui)
+
+Pedido explícito de rediseñar toda la UI guiándose por [tauri-ui](https://github.com/agmmnn/tauri-ui)
+(agmmnn), un scaffolder que combina Tauri con shadcn/ui (Radix UI + Tailwind + theming
+claro/oscuro). tauri-ui en sí es un generador de proyectos Next.js/Vite nuevos, no algo
+"instalable" dentro de una app ya existente — se tradujo el patrón (Tailwind + primitivas
+Radix con la API de shadcn/ui + theming por variables CSS) a mano sobre el Vite+React ya
+existente:
+
+- [x] **Tailwind v4** (`@tailwindcss/vite`, CSS-first: `@theme inline` en `App.css`, sin
+      `tailwind.config.js`) + alias `@/*` → `src/*` en `vite.config.ts`, `vitest.config.ts` y
+      `tsconfig.json`.
+- [x] **Primitivas al estilo shadcn/ui escritas a mano** (`src/components/ui/`): Button (cva,
+      variants default/destructive/outline/secondary/ghost/link), Input, Label, Switch, Badge,
+      Dialog, Select, Tooltip — sobre los primitivos de Radix UI (`@radix-ui/react-*`) más
+      `class-variance-authority`/`clsx`/`tailwind-merge`/`lucide-react`. **El CLI de shadcn no
+      se pudo usar**: su flujo `init`/`add` actual depende de una llamada de red a
+      `ui.shadcn.com` para resolver el registry, y ese host está bloqueado por la política de
+      red de este entorno (403 confirmado contra el proxy) — se instalaron los mismos paquetes
+      Radix que el CLI habría instalado y se escribieron los componentes a mano siguiendo la
+      API pública de shadcn/ui (mismos nombres de props/variantes), así que son
+      intercambiables con los del CLI si se corre en un entorno sin esa restricción más
+      adelante.
+- [x] **Tokens de diseño** en `App.css`: paleta neutral de shadcn en OKLCH (`--background`,
+      `--foreground`, `--card`, `--primary`, `--border`, `--radius`, etc.) para claro y oscuro,
+      más tokens propios `--status-running/starting/crashed/stopped` (constantes entre temas:
+      son señales de estado, no acentos decorativos).
+      `@custom-variant dark (&:is(.dark *))` en vez de la estrategia por defecto de Tailwind
+      (`prefers-color-scheme`), para poder tener "claro"/"oscuro"/"sistema" como opciones
+      explícitas.
+- [x] **`theme-provider.tsx`**: persiste la elección en `localStorage`, sigue
+      `prefers-color-scheme` en vivo cuando el modo es "sistema", y aplica la clase `.dark`
+      sincrónicamente en `main.tsx` antes del primer render (sin esperar al efecto) para evitar
+      un flash del tema incorrecto. Toggle de tres estados (☀️/🌙/🖥️) en Settings.
+- [x] **Los cinco componentes reescritos** sobre las primitivas nuevas: `App.tsx` (header con
+      iconos de lucide-react en vez de glifos de texto), `ProjectList.tsx` (acciones que
+      aparecen al hacer hover sobre la fila, badges para puerto/errores/reintentos),
+      `ProjectForm.tsx` (Select de Radix para scripts detectados, Switch para auto-restart),
+      `Settings.tsx` (toggle de tema, badges de nivel en diagnóstico), `PortConflictDialog.tsx`
+      (Dialog de Radix con foco atrapado en vez del backdrop/modal hecho a mano). `App.css`
+      quedó reducido a la configuración de Tailwind/tokens más lo genuinamente bespoke
+      (`.terminal-host` para xterm.js, `.scrollbar-thin`).
+
+**Cambio de texto accesible que afecta a `e2e/macos`**: el botón "+ Proyecto" pasó a tener un
+ícono real (`PlusIcon`) en vez del carácter "+" como texto, así que su nombre accesible pasó
+de "+ Proyecto" a "Proyecto" — se actualizaron los flujos `02_folder_picker.sh` y
+`03_project_crud.sh` para que sigan apuntando al botón correcto. El resto de los selectores
+(`Salir de easy-term`, `Elegir…`, labels de campos) no cambiaron de texto.
+
+Verificado visualmente en Linux (Xvfb + xdotool): tema claro, tema oscuro (incluyendo el
+tooltip de Radix confirmando que el toggle funciona), formulario completo con Switch/Select/
+Input, picker de carpeta nativo (GTK) sin regresión, fila de proyecto con badge de estado y
+acciones reveal-on-hover, crear/eliminar un proyecto de punta a punta. `cargo test` (41),
+`pnpm test` (16) y `pnpm build` (incluye `tsc`) siguen en verde.
+
+**Bug reportado en macOS real: la app no se podía abrir desde el tray con otra app en
+pantalla completa.** Un `NSWindow` solo puede aparecer, por defecto, en el Space en el que se
+mostró la última vez; `visible_on_all_workspaces` (que Tauri sí expone, pero que este proyecto
+nunca usó) lo agregaría a todos los Spaces *normales* — pero un Space ocupado por una app en
+pantalla completa es un Space exclusivo aparte, fuera de esa lista. Sin el flag
+`NSWindowCollectionBehaviorFullScreenAuxiliary` (el que usan utilidades de la barra de menú
+como Bartender/Ice/iStat Menus para poder mostrarse mientras otra app está en fullscreen), el
+click en el tray no tenía ningún efecto visible: el popover intentaba abrirse en un Space que
+el usuario no podía ver. Tauri/tao no exponen ese flag por su API pública, así que se agregó
+`macos_window.rs`, que toma el puntero crudo al `NSWindow` vía `window.ns_window()` y le
+suma `CanJoinAllSpaces | FullScreenAuxiliary` a su `collectionBehavior` directamente por
+`objc2`/`objc2-app-kit` (agregados como dependencia solo para `cfg(target_os = "macos")`,
+misma versión que ya traían tao/wry transitivamente — no se duplica ni diverge nada en
+`Cargo.lock`). Se llama una sola vez en `setup()`, ya que `collectionBehavior` es una
+propiedad persistente del `NSWindow`, no algo que se resetee entre `hide()`/`show()`.
+
+**Nota de confianza**: no se pudo compilar ni un `cargo check` de este código — este sandbox
+es Linux sin toolchain de cross-compilación a macOS (`objc2-exception-helper` necesita
+compilar un `.m` con `-arch`/`-mmacosx-version-min`, que el `cc` de Linux no soporta), así que
+un `cargo check --target x86_64-apple-darwin` falla en el build script antes de llegar a
+tipar el código nuevo. La superficie de riesgo se redujo lo más posible: `objc2`/
+`objc2-app-kit` ya son dependencias transitivas de tao/wry en las mismas versiones exactas
+(0.6.4/0.3.2, confirmado en `Cargo.lock` — no hay una segunda copia divergente), y las firmas
+de `NSWindow::collectionBehavior`/`setCollectionBehavior` y los bits de
+`NSWindowCollectionBehavior` se verificaron a mano contra el código fuente del crate
+instalado. Aun así, esto necesita confirmarse en una Mac real — no está probado.
+
+**Seguimiento: el fix de arriba no alcanzó — el usuario confirmó que el problema seguía
+pasando.** Investigando más (comparando con la implementación de Electron para
+`setVisibleOnAllWorkspaces({ visibleOnFullScreen: true })`, que usa exactamente los mismos
+dos flags `CanJoinAllSpaces | FullScreenAuxiliary`, y con un issue de Tauri —
+tauri-apps/tauri#5566— donde `setLevel_`/`setCollectionBehavior_` "funciona en dev pero no
+después de empaquetar") apareció un problema de *timing*, no de flags: `collectionBehavior`
+se estaba seteando **una sola vez en `setup()`**, sobre una ventana con `"visible": false` en
+`tauri.conf.json` — es decir, una ventana que en ese momento nunca fue mostrada/"realizada"
+por el WindowServer. Fijar `collectionBehavior` sobre una `NSWindow` que todavía no fue
+ordenada al frente ni una vez es conocido por no "pegar" de forma confiable en macOS (calza
+con el patrón "funciona en dev, no en release" del issue de Tauri: el flujo de dev
+probablemente termina mostrando la ventana en algún punto antes, dejando que la propiedad se
+aplique correctamente por casualidad).
+
+Corregido moviendo la llamada a `allow_join_fullscreen_space` de `setup()` a
+`toggle_popover()`, justo antes de cada `window.show()` — se reaplica en cada apertura real
+(tanto desde el click del tray como desde el atajo global `Alt+Space`, ambos pasan por esa
+misma función) en vez de una sola vez sobre una ventana todavía no realizada. Los flags en sí
+(`CanJoinAllSpaces | FullScreenAuxiliary`) quedaron sin cambios — coinciden con los que usa
+Electron internamente para la misma feature, así que no eran el problema.
+
+**Misma limitación de antes, sin poder verificarlo**: el cfg-gate `target_os = "macos"` hace
+que ni siquiera este cambio de *dónde* se llama la función se compile en este sandbox Linux
+— sigue pendiente de confirmación real.
+
+**Segundo seguimiento: tampoco alcanzó, ni siquiera en el build de producción.** El usuario
+confirmó que con el fix anterior (reaplicar en cada `show()`) el problema persistía tanto en
+`pnpm tauri dev` como en un build real — descartando de una vez la teoría de timing
+dev-vs-release. Antes de intentar un tercer fix a ciegas, se buscaron implementaciones reales
+y funcionando: código fuente de apps open-source de macOS que sí logran mostrarse sobre una
+app en pantalla completa (NotchDrop, Lunar, y varias más, vía búsqueda de código en GitHub
+por `fullScreenAuxiliary` + `canJoinAllSpaces` en Swift). El patrón es consistente en
+absolutamente todas: además de esos dos flags de `collectionBehavior`, **todas** suben el
+`level` de la ventana a `NSStatusWindowLevel` (25) o más — el mismo nivel en el que renderiza
+la propia barra de menú del sistema. `alwaysOnTop: true` en `tauri.conf.json` solo le da a la
+ventana `NSFloatingWindowLevel` (3, vía tao), muy por debajo de dónde compone una Space en
+pantalla completa. Sin ese nivel, ningún `collectionBehavior` alcanza — coincide con lo que
+reportó el usuario (ningún cambio visible en absoluto, ni siquiera un parpadeo).
+
+Se agregó `ns_window.setLevel(NSStatusWindowLevel)` a `allow_join_fullscreen_space` (solo si
+el nivel actual es menor, para no bajarlo si algo lo tenía más alto). Sigue sin poder
+compilarse en este sandbox — pendiente de que el usuario confirme con el build nuevo.
+
+**Tercer seguimiento: tampoco alcanzó — "no funciona para nada".** El fix del `level` no
+cambió nada observable. Se confirmó de forma concreta (revisando `cargo tree` contra el
+target `x86_64-apple-darwin`) que este sandbox no tiene forma de compilar ni tipar código
+`objc2`/AppKit real: `objc2-exception-helper` (dependencia transitiva de `tao` y `rfd`, ya
+presente antes de cualquier cambio de esta sesión — no es algo que este fix haya introducido)
+necesita compilar un `.m` con flags de Clang para macOS (`-arch`/`-mmacosx-version-min`) que
+el `cc` de Linux no soporta, y no hay SDK/toolchain de cross-compilación (`osxcross`)
+instalado. Sin poder ejecutar ni un `cargo check` real contra AppKit, seguir iterando a
+ciegas sobre qué combinación exacta de flags/nivel funciona dejó de ser productivo.
+
+Cambio de estrategia: en vez de otro fix-adivinanza, se agregó **instrumentación** —
+`macos_window::log_window_diagnostics`, llamada justo después de cada `show()`, que vuelca al
+mismo log de diagnóstico que ya usa Settings → Diagnóstico (`isVisible`, `isOnActiveSpace`,
+`isKeyWindow`, `occlusionState`, `level`, `collectionBehavior`, `frame`) — son exactamente las
+propiedades de AppKit que determinan si una ventana efectivamente se pinta sobre una Space en
+pantalla completa. Como el popover no abre durante el repro (ese es justamente el bug), la UI
+de Settings no es alcanzable en ese momento — el archivo hay que leerlo directo:
+`~/Library/Logs/easy-term/errors-YYYY-MM-DD.jsonl` (el de hoy). Con esos valores reales se
+puede diagnosticar con precisión en vez de seguir adivinando — sea que el problema esté en
+`collectionBehavior`/`level` (no tomaron efecto), en el posicionamiento de
+`tauri-plugin-positioner` (la ventana se mueve fuera de pantalla), o en algo completamente
+distinto que ninguna de las dos hipótesis anteriores contempló.
+
+**Cuarto seguimiento: nueva pista concreta del usuario antes de correr el diagnóstico.**
+Describió el síntoma con más precisión: "a veces, cuando no abre, al clickear la pantalla de
+la app activa parpadea, como si se hiciera focus y se quitara". Eso apunta a un mecanismo
+puntual: el handler de `Focused(false)` en `setup()` (agregado hace varias fases para que el
+popover se comporte como uno nativo — oculta la ventana al perder foco) probablemente está
+reaccionando a una pérdida de foco *espuria*. La hipótesis: `show()` + `set_focus()` sí le dan
+foco a la ventana por una fracción de segundo mientras AppKit todavía está acomodándola en la
+Space de la app en pantalla completa; ese foco se pierde casi al instante (la ventana no logra
+mantenerse "key" ahí), dispara `Focused(false)`, y el handler la oculta de nuevo antes de que
+el usuario llegue a verla — el parpadeo reportado es exactamente esa transición de
+foco-ganado-y-perdido. Esto además explicaría por qué a veces "no hace nada en absoluto": si
+la transición es más rápida, el parpadeo no llega a percibirse.
+
+Se agregaron dos cosas:
+- **Un fix dirigido**: `toggle_popover` ahora activa `SuppressAutoHide` (el mismo flag que ya
+  existía para el picker de carpeta) justo antes de `show()`/`set_focus()`, y lo libera solo
+  después de 700ms en un hilo aparte — así un blur espurio durante el acomodo en la Space no
+  se confunde con el usuario clickeando fuera del popover.
+- **Logging en el handler de blur mismo** (no específico de macOS, corre en cualquier
+  plataforma): cada `Focused(false)` ahora escribe `BLUR_SUPPRESSED` o `BLUR_HID_WINDOW` al
+  mismo log de diagnóstico — esto confirma o refuta la hipótesis directamente, incluso si el
+  fix de 700ms no alcanza a resolverlo del todo.
+
+A diferencia de los cambios anteriores, la parte de logging en el handler de blur **no** está
+detrás de `cfg(target_os = "macos")` — corre en cualquier plataforma, así que esta vez sí pasó
+por un `cargo check`/`clippy`/`build` real en este sandbox Linux (los cambios específicos de
+AppKit en `macos_window.rs` siguen sin poder compilarse acá, misma limitación de siempre).
+
+**Quinto seguimiento — investigación a fondo: causa raíz encontrada y fix canónico aplicado.**
+A pedido explícito del usuario ("investiga en la web, en issues, etc, el por qué de esto") se
+hizo la investigación que debió hacerse antes de iterar parches. Hallazgos, con fuentes:
+
+- **La causa raíz no eran los flags — era el *show path*.** tao (la capa de ventanas de
+  Tauri) implementa `set_visible(true)` con `makeKeyAndOrderFront` y `set_focus()` con
+  `makeKeyAndOrderFront` + `activateIgnoringOtherApps:YES` (verificado en el código fuente de
+  tao 0.35, `platform_impl/macos/util/async.rs`). Una `NSWindow` común solo puede volverse
+  key si su app está *activa* — y activar esta app (Accessory) mientras otra app es dueña de
+  la Space fullscreen frontal hace que macOS intente una transición de foco/Space y rebote la
+  activación de vuelta a la app fullscreen. Ese rebote es *exactamente* el parpadeo que
+  reportó el usuario ("como si se hiciera focus y se quitara"). En el rebote, nuestra ventana
+  o nunca llega a ordenarse en esa Space, o retiene key un instante y lo pierde — y el
+  hide-on-blur la ocultaba. Por eso `collectionBehavior` + `level` (fixes 1-3) eran
+  necesarios pero **nunca** iban a alcanzar.
+- **Es una limitación conocida y sin fix planificado en Tauri**: pedir esto está en
+  tauri-apps/tauri#5793 ("show window on top of full-screen app", cerrado como *not
+  planned*), tauri-apps/tauri#11488 (`visibleOnAllWorkspaces` no cubre Spaces fullscreen) y
+  tauri-apps/tauri#9556; el soporte de ventanas tipo panel es un feature request abierto en
+  tauri-apps/tao#136.
+- **La solución nativa de macOS** (la que usan Spotlight y todas las apps Swift de barra de
+  menú revisadas: NotchDrop, NotesOllama, el PIP de Telegram, etc.) es un **`NSPanel` con
+  `NSWindowStyleMaskNonActivatingPanel`**: un panel así puede volverse key **sin activar la
+  app**, así que la Space fullscreen nunca se ve perturbada — sin rebote, sin parpadeo.
+- **El estándar comunitario en Tauri** es el crate `tauri-nspanel` (ahkohd), que swizzlea la
+  clase Objective-C de la ventana existente a una subclase de `NSPanel`. Es lo que usa el
+  ejemplo canónico de menubar app (`ahkohd/tauri-macos-menubar-app-example`, branch
+  `v2-popover`), y el crate trae un ejemplo `examples/fullscreen` que es literalmente nuestro
+  caso, con comentarios que dicen "Ensures the panel cannot activate the app" y "display on
+  the same space as the full screen window". Ambos repos se **clonaron y leyeron completos**
+  en esta sesión (el acceso git a github.com sí funciona en este sandbox, a diferencia del
+  toolchain de compilación) para copiar la configuración exacta, no de memoria.
+
+Implementación (espeja el ejemplo canónico casi línea por línea):
+- `tauri-nspanel` branch `v2` como dependencia solo-macOS (Cargo.lock la fija al commit
+  `18ffb9a2`, el mismo HEAD contra el que compila el ejemplo canónico), plugin registrado con
+  cfg-gate.
+- `macos_window.rs` reescrito: `convert_to_menubar_panel` hace `window.to_panel()`, level
+  `NSMainMenuWindowLevel + 1`, `CanJoinAllSpaces | Stationary | FullScreenAuxiliary`, style
+  mask `NonActivatingPanel`, y un `panel_delegate!` con `window_did_resign_key` /
+  `window_did_become_key`.
+- **Efecto colateral manejado**: `set_delegate` reemplaza el NSWindowDelegate por el que
+  fluían los eventos `Focused` de Tauri — así que el hide-on-blur viejo queda mudo en macOS.
+  El delegate del panel asume ambos roles: oculta el panel al perder key (respetando
+  `SuppressAutoHide` para el picker de carpeta, más un chequeo de "¿somos la app frontmost?"
+  copiado del ejemplo canónico que cubre el caso del diálogo nativo), y re-emite las
+  transiciones de foco como evento `easyterm://panel-focus` que `App.tsx` ahora escucha para
+  el polling de CPU/RAM (antes dependía de `onFocusChanged`, que muere con el swizzle).
+- `toggle_popover` en macOS usa `panel.show()` / `panel.order_out(None)` (con fallback al
+  path viejo si la conversión falló); el posicionamiento sigue siendo de
+  `tauri-plugin-positioner` (opera vía `setFrame`, que un panel hereda sin cambios).
+
+Misma limitación de compilación de siempre para el código AppKit, pero con una diferencia
+importante: esta vez la configuración no es una hipótesis propia sino la copia fiel de dos
+ejemplos publicados y funcionando del autor del crate, leídos desde el código fuente real.
+
+**✅ CONFIRMADO en macOS real por el usuario**: con el fix del NSPanel, el popover ya abre
+correctamente con otra app en pantalla completa. El código compiló a la primera en la Mac
+(solo warnings de deprecación del re-export de `cocoa`, silenciados después con el mismo
+`#![allow(deprecated)]` del ejemplo canónico — commit `d3ff5af`, cosmético). Los tres
+intentos anteriores (collectionBehavior, reaplicar en show, window level) quedan como
+registro de qué *no* alcanza por sí solo: nada de eso funciona mientras el show path pase por
+`makeKeyAndOrderFront`/`activateIgnoringOtherApps` sobre una `NSWindow` común.
+
+Pendiente de re-verificar manualmente en macOS tras el cambio de mecanismo de auto-cierre
+(el hide-on-blur pasó del handler de tao al delegate del panel): cerrar clickeando afuera,
+y que el picker de carpeta siga sin cerrarse solo (los flujos `01`/`02` de `e2e/macos`
+cubren esto en CI, con la salvedad de siempre de que esa suite aún no corrió en verde).
 
 ### Fase 4 — Diferenciadores (backlog, priorizar según uso real)
 - [ ] **4.1 Terminal interactiva**: `write_stdin` + `onData` de xterm.js → responder prompts
@@ -244,7 +617,8 @@ easy-term/
 │   │   ├── project_store.rs    # CRUD + persistencia JSON
 │   │   ├── port_checker.rs
 │   │   ├── script_detector.rs
-│   │   └── env_resolver.rs
+│   │   ├── env_resolver.rs
+│   │   └── error_logger.rs     # AppError, writer JSONL, panic hook, rotación
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── PLAN.md                     # este documento
@@ -253,7 +627,121 @@ easy-term/
 
 ---
 
-## 7. Riesgos y mitigaciones
+## 7. Diagnóstico interno: registro de errores de la app
+
+La app registra **sus propios errores** (no los de los proyectos del usuario) en logs
+estructurados JSON, para poder diagnosticar y corregir fallos a posteriori sin depender
+de que el usuario reproduzca el problema.
+
+### 7.1 Formato y ubicación
+
+- **Formato: JSONL** (un objeto JSON por línea, append-only). Más robusto que un array JSON:
+  una línea corrupta no invalida el archivo, el append es atómico a nivel de línea y se
+  procesa con streaming.
+- **Ubicación:** `~/Library/Logs/easy-term/errors-YYYY-MM-DD.jsonl` (la convención de macOS
+  para logs de apps; visible en Console.app).
+- **Rotación:** un archivo por día; retención de 14 días + límite global de 20 MB
+  (se borra lo más antiguo primero). Limpieza al arrancar la app.
+
+### 7.2 Esquema del evento de error
+
+```jsonc
+{
+  "ts": "2026-08-04T14:32:11.482Z",     // ISO 8601 UTC
+  "level": "error",                      // "warn" | "error" | "fatal"
+  "source": "backend",                   // "backend" | "frontend"
+  "module": "process_manager",           // módulo que originó el error
+  "code": "PTY_SPAWN_FAILED",            // código estable de la taxonomía (ver 7.3)
+  "message": "Failed to spawn PTY: No such file or directory",
+  "context": {                           // datos específicos del error (best-effort)
+    "projectId": "a1b2c3",
+    "command": "pnpm run dev",
+    "os_error": 2
+  },
+  "stack": "...",                        // stacktrace si existe (Rust backtrace o JS stack)
+  "session": "f47ac10b",                 // id aleatorio por arranque de la app (agrupa errores de una sesión)
+  "appVersion": "0.1.0",
+  "osVersion": "macOS 15.2"
+}
+```
+
+**Privacidad:** los logs son locales, nunca se envían a ningún sitio. Aun así, en `context`
+se registran rutas de proyecto tal cual (es la máquina del usuario), pero **nunca** valores
+de variables de entorno — solo sus nombres.
+
+### 7.3 Taxonomía de códigos de error
+
+Códigos estables (enum en Rust + union type en TS) para poder agrupar y buscar. Familias:
+
+| Familia | Ejemplos | Módulo típico |
+|---|---|---|
+| `PTY_*` | `PTY_SPAWN_FAILED`, `PTY_RESIZE_FAILED`, `PTY_READ_ERROR` | `process_manager` |
+| `PROC_*` | `PROC_KILL_FAILED`, `PROC_GROUP_ORPHANED`, `PROC_UNEXPECTED_EXIT` | `process_manager` |
+| `STORE_*` | `STORE_READ_FAILED`, `STORE_WRITE_FAILED`, `STORE_PARSE_ERROR`, `STORE_MIGRATION_FAILED` | `project_store` |
+| `ENV_*` | `ENV_SHELL_RESOLVE_FAILED`, `ENV_PATH_EMPTY` | `env_resolver` |
+| `PORT_*` | `PORT_CHECK_FAILED`, `PORT_KILL_OWNER_FAILED` | `port_checker` |
+| `DETECT_*` | `DETECT_PKG_JSON_INVALID`, `DETECT_IO_ERROR` | `script_detector` |
+| `IPC_*` | `IPC_COMMAND_PANIC`, `IPC_EVENT_EMIT_FAILED` | `commands` |
+| `UI_*` | `UI_UNHANDLED_ERROR`, `UI_UNHANDLED_REJECTION`, `UI_XTERM_ERROR`, `UI_RENDER_ERROR` | frontend |
+| `TRAY_*` | `TRAY_UPDATE_FAILED`, `TRAY_POSITION_FAILED` | `tray` |
+
+### 7.4 Arquitectura de captura
+
+```
+Frontend                                Backend (Rust)
+────────                                ──────────────
+window.onerror ──────┐
+unhandledrejection ──┤                  error_logger (módulo central)
+ErrorBoundary React ─┼─ invoke ───────▶  ├─ canal mpsc → writer thread único
+try/catch en ipc.ts ─┘  log_app_error    ├─ serializa a JSONL + append
+                                         ├─ rotación/retención
+Rust: panic hook ───────────────────────▶├─ dedupe: mismo (code+message) > 10/min
+Rust: Result<_, AppError> en comandos ──▶│         se colapsa en un evento "repeated"
+tracing::error! (opcional, puente) ─────▶└─ fallback: eprintln! si el disco falla
+```
+
+Puntos de captura:
+
+1. **Backend — tipo `AppError` central**: todos los comandos Tauri devuelven
+   `Result<T, AppError>`; `AppError` porta `code`, `message`, `context` y se loguea
+   automáticamente en el punto de conversión (impl de `From`/middleware), no en cada
+   call-site. Así ningún error de comando escapa sin registrarse.
+2. **Backend — panic hook**: `std::panic::set_hook` captura panics con backtrace
+   (`level: "fatal"`) y hace flush antes de morir.
+3. **Frontend — captura global**: `window.onerror` + `window.onunhandledrejection` +
+   un `ErrorBoundary` de React envían al comando `log_app_error`. El wrapper `ipc.ts`
+   también loguea todo `invoke` rechazado (con el nombre del comando en `context`).
+4. **Writer único con canal**: los productores no tocan el disco; empujan a un canal
+   `mpsc` y un thread dedicado escribe. Sin locks en el hot path, sin bloquear la UI,
+   y el orden de eventos queda serializado.
+5. **Anti-tormenta**: dedupe por `(code, message)` con ventana de 1 min (a partir de 10
+   repeticiones se emite un solo evento con `"repeats": N`). Evita que un error en loop
+   (p. ej. `PTY_READ_ERROR` por segundo) queme disco.
+
+### 7.5 Comandos Tauri adicionales
+
+| Comando | Firma | Descripción |
+|---|---|---|
+| `log_app_error` | `(FrontendError) -> ()` | Punto de entrada de errores del frontend |
+| `read_error_log` | `(day?, limit?) -> Vec<ErrorEvent>` | Lee eventos para el visor interno |
+| `open_logs_folder` | `() -> ()` | Abre `~/Library/Logs/easy-term/` en Finder |
+
+### 7.6 UI mínima (Settings → Diagnóstico)
+
+- Contador de errores de la sesión actual; si > 0, dot discreto en Settings.
+- Visor simple: tabla de eventos (hora, code, message) con filtro por nivel; click →
+  JSON completo expandido.
+- Botones: "Abrir carpeta de logs" y "Copiar último error" (para pegarlo en un issue).
+
+### 7.7 Futuro (fuera de v1)
+
+- Botón "Reportar" que pre-rellena un issue de GitHub con el JSON del error.
+- Envío opt-in de crash reports (nunca por defecto).
+- Puente `tracing` → error_logger para correlacionar errores con logs de debug.
+
+---
+
+## 8. Riesgos y mitigaciones
 
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
@@ -265,7 +753,7 @@ easy-term/
 
 ---
 
-## 8. Definición de éxito de la v1
+## 9. Definición de éxito de la v1
 
 Al final de la Fase 2, la app debe pasar esta prueba de fuego:
 
