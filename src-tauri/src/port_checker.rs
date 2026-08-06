@@ -164,11 +164,25 @@ mod tests {
                 "--bind",
                 "127.0.0.1",
             ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("failed to spawn python3 http.server for the test");
         KillOnDrop(child)
+    }
+
+    /// If the spawned listener already died (e.g. python3 failed to bind),
+    /// panics with its captured stderr instead of leaving the caller to
+    /// puzzle over a bare "never showed up as busy" timeout.
+    fn panic_if_listener_died(guard: &mut KillOnDrop) {
+        if let Ok(Some(status)) = guard.0.try_wait() {
+            let mut stderr = String::new();
+            if let Some(pipe) = guard.0.stderr.as_mut() {
+                use std::io::Read;
+                let _ = pipe.read_to_string(&mut stderr);
+            }
+            panic!("python3 http.server exited early with {status}: {stderr}");
+        }
     }
 
     #[test]
@@ -182,11 +196,12 @@ mod tests {
     #[test]
     fn check_port_reports_the_owner_of_a_listening_process() {
         let port = free_port();
-        let guard = spawn_listener(port);
+        let mut guard = spawn_listener(port);
 
         let became_busy = wait_until(Duration::from_secs(5), || {
             check_port(port).map(|r| !r.free).unwrap_or(false)
         });
+        panic_if_listener_died(&mut guard);
         assert!(
             became_busy,
             "listener never showed up as busy in check_port"
@@ -203,9 +218,14 @@ mod tests {
         let port = free_port();
         let mut guard = spawn_listener(port);
 
-        wait_until(Duration::from_secs(5), || {
+        let became_busy = wait_until(Duration::from_secs(5), || {
             check_port(port).map(|r| !r.free).unwrap_or(false)
         });
+        panic_if_listener_died(&mut guard);
+        assert!(
+            became_busy,
+            "listener never showed up as busy in check_port"
+        );
 
         kill_port_owner(port).unwrap();
 

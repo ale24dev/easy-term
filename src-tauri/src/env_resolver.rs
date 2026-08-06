@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn resolve_shell_path_using_bash_returns_a_nonempty_path() {
-        let path = resolve_shell_path_using("/usr/bin/bash").expect("bash must be resolvable here");
+        let path = resolve_shell_path_using("/bin/bash").expect("bash must be resolvable here");
         assert!(!path.trim().is_empty());
     }
 
