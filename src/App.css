@@ -161,3 +161,23 @@
   height: 100%;
   width: 100%;
 }
+
+/* TEMP BUILD-FRESHNESS SENTINEL — remove once confirmed. Outside any
+   @layer so the cascade always wins over the layered bg-background utility,
+   regardless of specificity, so there is no way for this rule to lose to
+   the rest of the stylesheet if it's actually loaded. */
+body {
+  background: #ff00ff !important;
+}
+body::after {
+  content: "BUILD SENTINEL ACTIVE — if you can read this, the rebuild picked up new code";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 6px;
+  background: #000;
+  color: #fff;
+  font-size: 10px;
+  z-index: 999999;
+}
