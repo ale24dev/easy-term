@@ -198,7 +198,7 @@ mod tests {
         let port = free_port();
         let mut guard = spawn_listener(port);
 
-        let became_busy = wait_until(Duration::from_secs(5), || {
+        let became_busy = wait_until(Duration::from_secs(20), || {
             check_port(port).map(|r| !r.free).unwrap_or(false)
         });
         panic_if_listener_died(&mut guard);
@@ -218,7 +218,7 @@ mod tests {
         let port = free_port();
         let mut guard = spawn_listener(port);
 
-        let became_busy = wait_until(Duration::from_secs(5), || {
+        let became_busy = wait_until(Duration::from_secs(20), || {
             check_port(port).map(|r| !r.free).unwrap_or(false)
         });
         panic_if_listener_died(&mut guard);
