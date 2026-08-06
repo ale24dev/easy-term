@@ -39,9 +39,14 @@
 }
 
 .dark {
-  /* shadcn/ui's stock default dark theme (zinc) — back to this after two
-     rounds of custom backgrounds (navy, then warm brown) neither landed. */
-  --background: oklch(0.145 0 0);
+  /* Matches the row hover tone (--accent at 60% over the old near-black
+     background) — the user pointed at that hover shade and asked for it
+     as the base background. The two earlier custom-background rounds
+     (navy, then warm brown) that "never landed" were actually invisible
+     for an unrelated reason: see the canvas-propagation note on #root
+     below — a body background painted the corners solid regardless of
+     what color it was, masking any of those attempts either way. */
+  --background: oklch(0.22 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -110,17 +115,25 @@
     overflow: hidden;
   }
 
-  /* The window itself is transparent (tauri.conf.json) so this rounded,
-     opaque shell reads as a rounded window instead of a square one with a
-     rounded div floating inside it. rounded-xl (not a bare var()) because
-     --radius-xl only exists inlined into generated utilities, not as its
-     own custom property, under Tailwind v4's `@theme inline`. */
+  /* A `body` background paints the whole canvas/viewport per the CSS
+     spec (it propagates up when `html` has none of its own) — which
+     bypasses `body`'s own border-radius/overflow entirely. That's why the
+     "rounded window" corners were actually getting filled in solid: the
+     rounded clip on `body` was never clipping `body`'s own background in
+     the first place. Keeping html/body transparent and putting the actual
+     opaque, rounded shell on `#root` (a plain child div, so no canvas
+     propagation) is what makes the window read as truly rounded over the
+     transparent NSWindow (tauri.conf.json). rounded-xl (not a bare
+     var()) because --radius-xl only exists inlined into generated
+     utilities, not as its own custom property, under Tailwind v4's
+     `@theme inline`. */
+  html,
   body {
-    @apply rounded-xl;
+    background: transparent;
   }
 
-  body {
-    @apply bg-background text-foreground font-sans text-[13px] antialiased;
+  #root {
+    @apply rounded-xl bg-background text-foreground font-sans text-[13px] antialiased;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -160,24 +173,4 @@
 .terminal-host {
   height: 100%;
   width: 100%;
-}
-
-/* TEMP BUILD-FRESHNESS SENTINEL — remove once confirmed. Outside any
-   @layer so the cascade always wins over the layered bg-background utility,
-   regardless of specificity, so there is no way for this rule to lose to
-   the rest of the stylesheet if it's actually loaded. */
-body {
-  background: #ff00ff !important;
-}
-body::after {
-  content: "BUILD SENTINEL ACTIVE — if you can read this, the rebuild picked up new code";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: 6px;
-  background: #000;
-  color: #fff;
-  font-size: 10px;
-  z-index: 999999;
 }

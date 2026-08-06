@@ -140,12 +140,23 @@ pub fn convert_to_menubar_panel(app: &AppHandle) {
     panel.set_style_mask(NSWindowStyleMaskNonActivatingPanel);
 
     // Belt and suspenders for the rounded-corner window shell (CSS
-    // border-radius + overflow:hidden on `body`, tauri.conf.json's window
+    // border-radius + overflow:hidden on `#root`, tauri.conf.json's window
     // `transparent: true`): make sure the panel itself is non-opaque too,
     // in case anything about the class swizzle above interacts with
     // whichever point in window setup wry's own transparency handling
     // runs at. Explicit here rather than assumed from config alone.
     panel.set_opaque(false);
+
+    // set_opaque(false) only says the panel *may* show through; it doesn't
+    // clear whatever NSColor the window's backgroundColor already holds.
+    // Square corners outside the CSS-rounded `#root` shell paint with that
+    // color, so without an explicit clearColor here they show up as a
+    // solid fill instead of see-through — make it explicit rather than
+    // relying on whatever wry happened to set before the class swizzle.
+    unsafe {
+        let clear_color: tauri_nspanel::cocoa::base::id = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![&*panel, setBackgroundColor: clear_color];
+    }
 
     panel.set_delegate(delegate);
 }
