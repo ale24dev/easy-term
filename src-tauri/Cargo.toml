@@ -1,8 +1,9 @@
 [package]
 name = "easy-term"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "A macOS menu bar app for running local dev servers"
+authors = ["Ale Diaz"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

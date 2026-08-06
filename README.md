@@ -12,6 +12,7 @@
   <a href="https://github.com/ale24dev/easy-term/actions/workflows/ci.yml"><img src="https://github.com/ale24dev/easy-term/workflows/CI/badge.svg" alt="CI status" /></a>
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS only" />
   <img src="https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB" alt="Built with Tauri v2" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
 </p>
 
 ---
@@ -121,4 +122,4 @@ Not yet built, in rough priority order:
 
 ## License
 
-Not yet decided.
+[MIT](LICENSE)
