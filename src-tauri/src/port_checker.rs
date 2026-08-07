@@ -185,6 +185,41 @@ mod tests {
         }
     }
 
+    /// Dumps everything the OS actually knows about the listener process and
+    /// the port, for when `check_port`'s own `lsof -sTCP:LISTEN` filter comes
+    /// back empty despite the process still being alive (per
+    /// `panic_if_listener_died` not having fired) — rather than guess again
+    /// at *why* lsof doesn't see it, the next real failure should just show
+    /// what state the OS thinks the socket is actually in.
+    fn debug_port_snapshot(port: u16, pid: u32) -> String {
+        let run = |cmd: &str, args: &[&str]| -> String {
+            match Command::new(cmd).args(args).output() {
+                Ok(o) => format!(
+                    "$ {cmd} {}\n(status: {})\nstdout:\n{}\nstderr:\n{}",
+                    args.join(" "),
+                    o.status,
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr),
+                ),
+                Err(e) => format!("$ {cmd} {} -> failed to run: {e}", args.join(" ")),
+            }
+        };
+
+        let pid_s = pid.to_string();
+        [
+            // Unrestricted state (no -sTCP:LISTEN filter) — is the socket
+            // there at all, just in a state check_port doesn't match?
+            run("lsof", &["-nP", &format!("-iTCP:{port}")]),
+            // Every fd the child actually has open, regardless of port —
+            // is it listening somewhere check_port never asked about?
+            run("lsof", &["-nP", "-p", &pid_s]),
+            // Is the process itself in a weird state (stopped/zombie)
+            // despite try_wait() reporting it as still running?
+            run("ps", &["-p", &pid_s, "-o", "pid,ppid,stat,command"]),
+        ]
+        .join("\n\n")
+    }
+
     #[test]
     fn check_port_reports_free_for_an_unused_port() {
         let port = free_port();
@@ -202,10 +237,14 @@ mod tests {
             check_port(port).map(|r| !r.free).unwrap_or(false)
         });
         panic_if_listener_died(&mut guard);
-        assert!(
-            became_busy,
-            "listener never showed up as busy in check_port"
-        );
+        if !became_busy {
+            let pid = guard.0.id();
+            panic!(
+                "listener (pid {pid}) never showed up as busy in check_port. \
+                 OS-level snapshot at the moment of failure:\n\n{}",
+                debug_port_snapshot(port, pid)
+            );
+        }
 
         let result = check_port(port).unwrap();
         assert!(!result.free);
@@ -222,10 +261,14 @@ mod tests {
             check_port(port).map(|r| !r.free).unwrap_or(false)
         });
         panic_if_listener_died(&mut guard);
-        assert!(
-            became_busy,
-            "listener never showed up as busy in check_port"
-        );
+        if !became_busy {
+            let pid = guard.0.id();
+            panic!(
+                "listener (pid {pid}) never showed up as busy in check_port. \
+                 OS-level snapshot at the moment of failure:\n\n{}",
+                debug_port_snapshot(port, pid)
+            );
+        }
 
         kill_port_owner(port).unwrap();
 
