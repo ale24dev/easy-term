@@ -11,9 +11,13 @@ APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 # Isolated HOME-relative data dirs so a CI run never touches (or is polluted
 # by) a real user's projects.json / diagnostics log. easy-term resolves both
-# under $HOME, so pointing HOME at a throwaway dir is enough.
+# under $HOME, so pointing HOME at a throwaway dir is enough. Deliberately
+# NOT exported yet — cargo/rustup also resolve their toolchain under $HOME
+# (~/.rustup, ~/.cargo) by default, so overriding it before build_app() runs
+# `pnpm tauri build` makes rustup unable to find the toolchain at all
+# ("no default is configured", even right after installing one). HOME gets
+# swapped in launch_app(), once the build no longer needs the real one.
 E2E_HOME="$(mktemp -d)"
-export HOME="$E2E_HOME"
 
 APP_PID=""
 FAILURES=0
@@ -46,6 +50,7 @@ build_app() {
 }
 
 launch_app() {
+  export HOME="$E2E_HOME"
   log "launching $APP_BINARY (HOME=$E2E_HOME)…"
   "$APP_BINARY" &
   APP_PID=$!

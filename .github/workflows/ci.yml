@@ -73,15 +73,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Belt and suspenders: this job hit "rustup could not choose a
-      # version of cargo to run... no default is configured" even though
-      # the toolchain step above ran — the `check` job (same action, same
-      # runner image) has never hit this. Whatever's inconsistent about it
-      # on this job's runner, explicitly setting the default removes the
-      # ambiguity rustup was complaining about.
-      - name: Ensure a default Rust toolchain is set
-        run: rustup default stable
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
