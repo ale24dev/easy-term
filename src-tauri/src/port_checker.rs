@@ -155,19 +155,24 @@ mod tests {
         }
     }
 
+    /// A real, externally-observable listening process for the test to
+    /// point `check_port`/`kill_port_owner` at. Was `python3 -m
+    /// http.server`, which turned out to leave its listening socket in
+    /// state CLOSED rather than LISTEN on the CI runner's Python 3.14 (a
+    /// live OS-level `lsof -p` dump of the child confirmed it: exactly one
+    /// TCP fd, bound to the right address:port, state CLOSED — not a
+    /// timing issue, whatever `http.server` does internally on that Python
+    /// build just never reaches LISTEN there). `nc -l` has one job — bind,
+    /// listen, block on accept — confirmed via the same lsof check to
+    /// report LISTEN immediately, and it's the same OpenBSD netcat build on
+    /// both macOS and this sandbox's Linux, so local and CI behavior match.
     fn spawn_listener(port: u16) -> KillOnDrop {
-        let child = Command::new("python3")
-            .args([
-                "-m",
-                "http.server",
-                &port.to_string(),
-                "--bind",
-                "127.0.0.1",
-            ])
+        let child = Command::new("nc")
+            .args(["-l", "127.0.0.1", &port.to_string()])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .expect("failed to spawn python3 http.server for the test");
+            .expect("failed to spawn nc for the test");
         KillOnDrop(child)
     }
 
