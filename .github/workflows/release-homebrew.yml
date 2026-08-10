@@ -1,0 +1,110 @@
+name: Release (Homebrew)
+
+# Se dispara al empujar un tag "vX.Y.Z". El flujo de release es dos pasos:
+#   1. Sube la versión en src-tauri/tauri.conf.json, commit y push a master.
+#   2. git tag vX.Y.Z && git push origin vX.Y.Z   ← esto arranca todo lo demás.
+#
+# El job corre en un runner de macOS real (GitHub-hosted): compila el
+# binario universal, lo firma con el certificado Developer ID, lo manda a
+# notarizar a Apple, verifica el resultado, crea la GitHub Release con el
+# .dmg como asset, y actualiza el Cask en el tap (ale24dev/homebrew-easy-term).
+#
+# Secrets necesarios en este repo (Settings → Secrets and variables →
+# Actions → Repository secrets):
+#   APPLE_CERTIFICATE            base64 del .p12 "Developer ID Application"
+#   APPLE_CERTIFICATE_PASSWORD   contraseña usada al exportar ese .p12
+#   APPLE_ID                     Apple ID usado para notarizar
+#   APPLE_PASSWORD                contraseña específica de app (no la normal)
+#   HOMEBREW_TAP_TOKEN            PAT con permiso de escritura solo sobre
+#                                  ale24dev/homebrew-easy-term
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write # crear la Release y subir el .dmg en ESTE repo
+
+jobs:
+  build-sign-release:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verificar que el tag coincide con tauri.conf.json
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CONF_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$TAG_VERSION" != "$CONF_VERSION" ]; then
+            echo "::error::El tag ($TAG_VERSION) no coincide con la versión de tauri.conf.json ($CONF_VERSION). Sube la versión, commitea y vuelve a taguear."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Rust (con los targets de macOS universal)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Dependencias de pnpm
+        run: pnpm install --frozen-lockfile
+
+      # Con estas variables en el entorno, `tauri build` importa el
+      # certificado en un llavero temporal, firma la .app y el .dmg, los
+      # manda a notarizar, espera el resultado y adjunta el ticket (staple)
+      # — sin ningún paso manual, igual que hace tauri-bundler en local.
+      - name: Compilar, firmar y notarizar
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: "9FU3PGG489"
+        run: pnpm tauri build --target universal-apple-darwin
+
+      - name: Verificar el resultado (staple + Gatekeeper)
+        run: |
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/easy-term.app"
+          xcrun stapler validate "$APP"
+          spctl -a -vvv --type execute "$APP"
+
+      - name: Calcular sha256
+        id: dmg
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/easy-term_${VERSION}_universal.dmg"
+          SHA256=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dmg_path=$DMG" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Crear la GitHub Release con el .dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "${{ steps.dmg.outputs.dmg_path }}" \
+            --title "easy-term ${{ steps.dmg.outputs.version }}" \
+            --generate-notes
+
+      - name: Actualizar el Cask en el tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/ale24dev/homebrew-easy-term.git" /tmp/tap
+          cd /tmp/tap
+          sed -i '' -E "s/version \"[^\"]+\"/version \"${{ steps.dmg.outputs.version }}\"/" Casks/easy-term.rb
+          sed -i '' -E "s/sha256 \"[^\"]+\"/sha256 \"${{ steps.dmg.outputs.sha256 }}\"/" Casks/easy-term.rb
+          git -c user.name="easy-term-release-bot" -c user.email="actions@users.noreply.github.com" \
+            commit -am "easy-term ${{ steps.dmg.outputs.version }}"
+          git push origin main

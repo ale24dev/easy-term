@@ -1,0 +1,39 @@
+# Plantilla de Cask de Homebrew para easy-term.
+#
+# No se instala tal cual: scripts/build-homebrew.sh imprime la versión y el
+# sha256 exactos después de compilar; sustitúyelos aquí (__VERSION__ /
+# __SHA256__) y copia el resultado a Casks/easy-term.rb en un tap personal
+# (p. ej. github.com/ale24dev/homebrew-easy-term — un tap propio, no el tap
+# oficial homebrew/homebrew-cask, que exige criterios de notoriedad que una
+# app nueva no cumple todavía).
+#
+# El nombre del asset debe coincidir con el que genera `tauri build`:
+# easy-term_<version>_universal.dmg (ver el propio build-homebrew.sh).
+
+cask "easy-term" do
+  version "__VERSION__"
+  sha256 "__SHA256__"
+
+  url "https://github.com/ale24dev/easy-term/releases/download/v#{version}/easy-term_#{version}_universal.dmg"
+  name "easy-term"
+  desc "Menu bar dev process manager for macOS"
+  homepage "https://github.com/ale24dev/easy-term"
+
+  depends_on macos: ">= :catalina"
+
+  app "easy-term.app"
+
+  # Deja que `brew livecheck` detecte versiones nuevas por los tags de
+  # GitHub Releases, para poder automatizar el bump del Cask más adelante.
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  zap trash: [
+    "~/Library/Application Support/dev.easyterm.app",
+    "~/Library/Preferences/dev.easyterm.app.plist",
+    "~/Library/Saved Application State/dev.easyterm.app.savedState",
+    "~/Library/Logs/easy-term",
+  ]
+end

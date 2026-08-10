@@ -66,6 +66,15 @@ Instead of juggling a terminal window per project, you define each project once 
 - **Global shortcut** (`Option+Space`) to toggle the popover from anywhere.
 - **Light/dark/system theme**, and an internal diagnostics log (Settings → Diagnostics) for troubleshooting the app itself.
 
+## Install
+
+```bash
+brew tap ale24dev/easy-term
+brew install --cask easy-term
+```
+
+Each release is a Developer ID–signed, notarized `.dmg` — Gatekeeper accepts it without any "unidentified developer" warning. See [Publishing a release](#publishing-a-release) below for how that gets built.
+
 ## Install / run from source
 
 Requires macOS, [pnpm](https://pnpm.io), and the [Rust toolchain](https://rustup.rs).
@@ -85,6 +94,45 @@ pnpm test                                          # frontend: Vitest
 ```
 
 CI runs all of the above (plus `tsc --noEmit` and `cargo fmt --check`) on every push and pull request — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+## Publishing a release
+
+Distribution is a Developer ID–signed, notarized `.dmg` via a [personal Homebrew tap](https://github.com/ale24dev/homebrew-easy-term) — the official `homebrew/homebrew-cask` tap has notability requirements a new app doesn't meet yet, but a personal tap needs no one's approval.
+
+### Automated (recommended)
+
+[`.github/workflows/release-homebrew.yml`](.github/workflows/release-homebrew.yml) runs the whole cycle on a GitHub-hosted macOS runner: builds the universal binary, signs it with a Developer ID certificate, notarizes it with Apple, verifies the result, creates the GitHub Release with the `.dmg`, and updates the Cask in the tap. The release flow is two steps:
+
+```bash
+# 1. Bump the version in src-tauri/tauri.conf.json, commit, push to master
+git add src-tauri/tauri.conf.json
+git commit -m "chore: version 0.2.0"
+git push
+
+# 2. Tag it — this triggers the whole pipeline
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+One-time setup — 5 secrets in **Settings → Secrets and variables → Actions → Repository secrets**:
+
+| Secret | How to get it |
+| --- | --- |
+| `APPLE_CERTIFICATE` | In Keychain Access, right-click your **"Developer ID Application"** certificate → Export → `.p12` format, with a password. Then `base64 -i Certificate.p12 \| pbcopy`. |
+| `APPLE_CERTIFICATE_PASSWORD` | The password you set when exporting that `.p12`. |
+| `APPLE_ID` | Your Apple ID email. |
+| `APPLE_PASSWORD` | A new, dedicated app-specific password for this workflow (don't reuse a local one) — [appleid.apple.com/account/manage](https://appleid.apple.com/account/manage) → Sign-In and Security → App-Specific Passwords. |
+| `HOMEBREW_TAP_TOKEN` | A GitHub [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to only `ale24dev/homebrew-easy-term`, with `Contents: Read and write`. The workflow's default token can't push to a different repo. |
+
+### Manual
+
+```bash
+export APPLE_ID="you@icloud.com"
+export APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+./scripts/build-homebrew.sh
+```
+
+Builds, signs, notarizes, staples the ticket, and prints the `.dmg`'s sha256. From there: create a GitHub Release (tag `v<version>`) with the `.dmg` as an asset, fill in [`homebrew/easy-term.rb.in`](homebrew/easy-term.rb.in) with that version and sha256, and publish it as `Casks/easy-term.rb` in the tap.
 
 ## How it works
 
