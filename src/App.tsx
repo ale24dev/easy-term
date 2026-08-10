@@ -122,6 +122,12 @@ function App() {
 
     function onFocusChanged(focused: boolean) {
       if (focused) {
+        // Reconcile on every open, not just the initial mount: this store
+        // otherwise depends entirely on live process:status events to stay
+        // accurate, and a hidden popover's webview can miss one (macOS may
+        // throttle a backgrounded WKWebView) — leaving start/restart/stop
+        // stuck acting on a stale status until the next full app restart.
+        syncStatuses();
         if (interval) return;
         poll();
         interval = setInterval(poll, RESOURCE_POLL_INTERVAL_MS);
@@ -148,7 +154,7 @@ function App() {
       unlistenPromise.then((unlisten) => unlisten());
       unlistenPanelFocus.then((unlisten) => unlisten());
     };
-  }, [setResourceStats]);
+  }, [setResourceStats, syncStatuses]);
 
   const activeProjectName =
     view.kind === "logs" ? (projects.find((p) => p.id === view.projectId)?.name ?? "") : "";
