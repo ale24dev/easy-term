@@ -20,7 +20,6 @@ use tauri::{
     AppHandle, Manager, Runtime, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_positioner::{Position, WindowExt};
 
 /// Set while a native dialog (e.g. the folder picker) is on screen.
@@ -90,24 +89,11 @@ pub(crate) fn quit(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let global_shortcut_plugin = tauri_plugin_global_shortcut::Builder::new()
-        .with_shortcut("Alt+Space")
-        .expect("invalid global shortcut definition")
-        .with_handler(|app, _shortcut, event| {
-            if event.state() == ShortcutState::Pressed {
-                if let Some(window) = app.get_webview_window("main") {
-                    toggle_popover(&window);
-                }
-            }
-        })
-        .build();
-
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(global_shortcut_plugin)
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,

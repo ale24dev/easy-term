@@ -63,7 +63,6 @@ Instead of juggling a terminal window per project, you define each project once 
 - **Reachable over full-screen apps.** Built on a non-activating `NSPanel` (the same mechanism Spotlight uses), so the popover shows up even while another app owns a full-screen Space — a regular Tauri window can't do this.
 - **Quick actions.** Open a project in your editor, reveal it in Finder, copy its detected URL, open it in the browser.
 - **Launch at login**, with running projects restored automatically.
-- **Global shortcut** (`Option+Space`) to toggle the popover from anywhere.
 - **Light/dark/system theme**, and an internal diagnostics log (Settings → Diagnostics) for troubleshooting the app itself.
 
 ## Install
