@@ -253,6 +253,15 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
     cmd.arg("-c");
     cmd.arg(&project.command);
     cmd.cwd(&project.path);
+    // Most dev servers (Next.js, Create React App, Express, ...) pick their
+    // port from $PORT by convention — without this, the configured port was
+    // only ever used for our own pre-start busy check and the "open in
+    // browser" URL guess, never actually telling the process to bind there.
+    // Set before the user's own env rows so an explicit PORT override there
+    // still wins.
+    if let Some(port) = project.port {
+        cmd.env("PORT", port.to_string());
+    }
     for (key, value) in env_resolver::overrides(&project.env) {
         cmd.env(key, value);
     }
