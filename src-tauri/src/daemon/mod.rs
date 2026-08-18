@@ -21,4 +21,6 @@
 //! Because the daemon also holds the ring buffers, reconnecting restores the
 //! scrollback from before the app was closed, not just the process list.
 
+pub mod client;
 pub mod protocol;
+pub mod server;

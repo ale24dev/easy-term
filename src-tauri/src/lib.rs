@@ -1,5 +1,5 @@
 mod commands;
-mod daemon;
+pub mod daemon;
 mod env_resolver;
 mod error_logger;
 #[cfg(target_os = "macos")]
@@ -8,7 +8,7 @@ mod notifications;
 mod popover;
 mod port_checker;
 mod process_manager;
-mod project_store;
+pub mod project_store;
 mod resource_monitor;
 mod script_detector;
 mod tauri_sink;
@@ -126,6 +126,13 @@ pub(crate) fn quit(app: &AppHandle) {
         e.emit();
     }
     app.exit(0);
+}
+
+/// Entry point for `easy-term --daemon`: serves the socket forever.
+pub fn run_daemon() -> Result<(), String> {
+    error_logger::init(env!("CARGO_PKG_VERSION").to_string(), std::env::consts::OS);
+    env_resolver::init();
+    daemon::server::run()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
