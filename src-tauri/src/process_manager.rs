@@ -5,9 +5,10 @@
 //! chatty dev server can't flood the frontend), and a waiter (blocks on
 //! `Child::wait()` to reap the process and report its exit).
 
+use crate::daemon::protocol::Event;
 use crate::env_resolver;
 use crate::error_logger::{log_error, AppError, Level, Source};
-use crate::project_store::Project;
+use crate::project_store::{Project, ProjectStore};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,36 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+
+/// Where a managed process's events go.
+///
+/// Exists so this module doesn't depend on Tauri: the daemon owns the
+/// processes and has no `AppHandle` at all, and its sink fans events out to
+/// connected clients over the socket instead. The GUI-side implementation
+/// re-emits them as Tauri events.
+pub trait EventSink: Send + Sync + 'static {
+    fn emit(&self, event: Event);
+}
+
+/// Everything a supervised process needs to reach: its bookkeeping, the
+/// project config (for auto-restart), and somewhere to report to.
+///
+/// Replaces the `&AppHandle` that used to be threaded through every
+/// function here — that handle was doing triple duty as managed-state
+/// lookup, event bus, and tray/notification hook, none of which a headless
+/// daemon can provide.
+#[derive(Clone)]
+pub struct Context {
+    pub manager: Arc<ProcessManager>,
+    pub store: Arc<ProjectStore>,
+    pub sink: Arc<dyn EventSink>,
+}
+
+impl Context {
+    fn emit(&self, event: Event) {
+        self.sink.emit(event);
+    }
+}
 
 const MODULE: &str = "process_manager";
 const RING_BUFFER_MAX: usize = 1024 * 1024;
@@ -150,46 +180,8 @@ pub struct StatusPayload {
     pub pid: Option<u32>,
 }
 
-#[derive(Serialize, Clone)]
-struct OutputPayload {
-    id: String,
-    chunk: String,
-}
-
-#[derive(Serialize, Clone)]
-struct ExitPayload {
-    id: String,
-    code: i32,
-}
-
-#[derive(Serialize, Clone)]
-struct UrlPayload {
-    id: String,
-    url: String,
-}
-
-#[derive(Serialize, Clone)]
-struct ErrorCountPayload {
-    id: String,
-    count: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct RestartScheduledPayload {
-    id: String,
-    attempt: u32,
-    max_attempts: u32,
-    delay_ms: u64,
-}
-
-#[derive(Serialize, Clone)]
-struct RestartExhaustedPayload {
-    id: String,
-}
-
-fn emit_status(app: &AppHandle, id: &str, status: ProjectStatus, pid: Option<u32>) {
-    let manager = app.state::<ProcessManager>();
+fn emit_status(ctx: &Context, id: &str, status: ProjectStatus, pid: Option<u32>) {
+    let manager = &ctx.manager;
     manager
         .statuses
         .lock()
@@ -203,20 +195,18 @@ fn emit_status(app: &AppHandle, id: &str, status: ProjectStatus, pid: Option<u32
     // backoff cap. The waiter thread resets attempts instead, based on how
     // long the process actually survived.
 
-    let _ = app.emit(
-        "process:status",
-        StatusPayload {
-            id: id.to_string(),
-            status,
-            pid,
-        },
-    );
-
-    crate::tray::refresh(app);
+    // The tray used to be refreshed right here. It's the GUI's job now:
+    // it refreshes on receiving this event, which also means the daemon
+    // stays free of any UI concern.
+    ctx.emit(Event::Status {
+        id: id.to_string(),
+        status,
+        pid,
+    });
 }
 
-pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
-    let manager = app.state::<ProcessManager>();
+pub fn start(ctx: &Context, project: Project) -> Result<(), AppError> {
+    let manager = &ctx.manager;
     {
         let processes = manager.processes.lock().unwrap();
         if processes.contains_key(&project.id) {
@@ -228,7 +218,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
         }
     }
 
-    emit_status(app, &project.id, ProjectStatus::Starting, None);
+    emit_status(ctx, &project.id, ProjectStatus::Starting, None);
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -239,7 +229,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
             pixel_height: 0,
         })
         .map_err(|e| {
-            emit_status(app, &project.id, ProjectStatus::Crashed, None);
+            emit_status(ctx, &project.id, ProjectStatus::Crashed, None);
             AppError::new(
                 MODULE,
                 "PTY_SPAWN_FAILED",
@@ -268,7 +258,7 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
 
     let started_at = Instant::now();
     let child = pair.slave.spawn_command(cmd).map_err(|e| {
-        emit_status(app, &project.id, ProjectStatus::Crashed, None);
+        emit_status(ctx, &project.id, ProjectStatus::Crashed, None);
         AppError::new(
             MODULE,
             "PTY_SPAWN_FAILED",
@@ -316,9 +306,9 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
         );
     }
 
-    spawn_reader_thread(app.clone(), project.id.clone(), reader, buffer);
+    spawn_reader_thread(ctx.clone(), project.id.clone(), reader, buffer);
     spawn_waiter_thread(
-        app.clone(),
+        ctx.clone(),
         project.id.clone(),
         project.name.clone(),
         child,
@@ -327,13 +317,13 @@ pub fn start(app: &AppHandle, project: Project) -> Result<(), AppError> {
         started_at,
     );
 
-    emit_status(app, &project.id, ProjectStatus::Running, Some(pid as u32));
+    emit_status(ctx, &project.id, ProjectStatus::Running, Some(pid as u32));
 
     Ok(())
 }
 
-pub fn stop(app: &AppHandle, id: &str) -> Result<(), AppError> {
-    let manager = app.state::<ProcessManager>();
+pub fn stop(ctx: &Context, id: &str) -> Result<(), AppError> {
+    let manager = &ctx.manager;
 
     // Any explicit stop — manual, via restart(), or before a delete —
     // cancels a pending auto-restart so it can't revive the project right
@@ -378,9 +368,9 @@ pub fn stop(app: &AppHandle, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn restart(app: &AppHandle, project: Project) -> Result<(), AppError> {
-    stop(app, &project.id)?;
-    start(app, project)
+pub fn restart(ctx: &Context, project: Project) -> Result<(), AppError> {
+    stop(ctx, &project.id)?;
+    start(ctx, project)
 }
 
 /// Exponential backoff for restart attempt `attempt` (1-indexed): 1s, 2s,
@@ -392,8 +382,8 @@ fn backoff_delay_ms(attempt: u32) -> u64 {
 /// Schedules an auto-restart attempt with exponential backoff (1s, 2s, 4s,
 /// … capped at 30s), up to `MAX_RESTART_ATTEMPTS`. Called only when a
 /// project with `auto_restart` enabled crashes.
-fn schedule_restart(app: &AppHandle, project: Project) {
-    let manager = app.state::<ProcessManager>();
+fn schedule_restart(ctx: &Context, project: Project) {
+    let manager = &ctx.manager;
     let (attempt, epoch) = {
         let mut state = manager.restart_state.lock().unwrap();
         let entry = state.entry(project.id.clone()).or_default();
@@ -414,32 +404,26 @@ fn schedule_restart(app: &AppHandle, project: Project) {
             Some(serde_json::json!({ "projectId": project.id })),
             None,
         );
-        let _ = app.emit(
-            "process:restart-exhausted",
-            RestartExhaustedPayload {
-                id: project.id.clone(),
-            },
-        );
+        ctx.emit(Event::RestartExhausted {
+            id: project.id.clone(),
+        });
         return;
     }
 
     let delay_ms = backoff_delay_ms(attempt);
 
-    let _ = app.emit(
-        "process:restart-scheduled",
-        RestartScheduledPayload {
-            id: project.id.clone(),
-            attempt,
-            max_attempts: MAX_RESTART_ATTEMPTS,
-            delay_ms,
-        },
-    );
+    ctx.emit(Event::RestartScheduled {
+        id: project.id.clone(),
+        attempt,
+        max_attempts: MAX_RESTART_ATTEMPTS,
+        delay_ms,
+    });
 
-    let app = app.clone();
+    let ctx = ctx.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(delay_ms));
 
-        let manager = app.state::<ProcessManager>();
+        let manager = &ctx.manager;
         let still_valid = manager
             .restart_state
             .lock()
@@ -449,13 +433,13 @@ fn schedule_restart(app: &AppHandle, project: Project) {
             == Some(epoch);
 
         if still_valid {
-            let _ = start(&app, project);
+            let _ = start(&ctx, project);
         }
     });
 }
 
-pub fn get_output(app: &AppHandle, id: &str) -> String {
-    let manager = app.state::<ProcessManager>();
+pub fn get_output(ctx: &Context, id: &str) -> String {
+    let manager = &ctx.manager;
     let processes = manager.processes.lock().unwrap();
     match processes.get(id) {
         Some(handle) => {
@@ -471,15 +455,15 @@ pub fn get_output(app: &AppHandle, id: &str) -> String {
 /// projects with no configured port) before moving on to the next. Runs on
 /// its own thread — the caller gets progress via the usual `process:status`
 /// events, not a blocking return.
-pub fn start_group(app: &AppHandle, projects: Vec<Project>) {
-    let app = app.clone();
+pub fn start_group(ctx: &Context, projects: Vec<Project>) {
+    let ctx = ctx.clone();
     std::thread::spawn(move || {
         for project in projects {
             let port = project.port;
             let id = project.id.clone();
             let name = project.name.clone();
 
-            if let Err(e) = start(&app, project) {
+            if let Err(e) = start(&ctx, project) {
                 log_error(
                     Level::Warn,
                     Source::Backend,
@@ -502,11 +486,11 @@ pub fn start_group(app: &AppHandle, projects: Vec<Project>) {
 
 /// Stops every project in a group concurrently (order doesn't matter for
 /// shutdown), so an N-project group stops in ~3s total instead of N × 3s.
-pub fn stop_group(app: &AppHandle, project_ids: Vec<String>) {
+pub fn stop_group(ctx: &Context, project_ids: Vec<String>) {
     for id in project_ids {
-        let app = app.clone();
+        let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let _ = stop(&app, &id);
+            let _ = stop(&ctx, &id);
         });
     }
 }
@@ -542,7 +526,7 @@ fn send_signal(id: &str, pid: i32, signal: i32) -> Result<(), AppError> {
 }
 
 fn spawn_reader_thread(
-    app: AppHandle,
+    ctx: Context,
     id: String,
     mut reader: Box<dyn Read + Send>,
     buffer: Arc<Mutex<Vec<u8>>>,
@@ -552,11 +536,11 @@ fn spawn_reader_thread(
         .spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
-            let batcher_app = app.clone();
+            let batcher_ctx = ctx.clone();
             let batcher_id = id.clone();
             let batcher = std::thread::Builder::new()
                 .name(format!("pty-batch-{batcher_id}"))
-                .spawn(move || batch_and_emit(batcher_app, batcher_id, rx))
+                .spawn(move || batch_and_emit(batcher_ctx, batcher_id, rx))
                 .ok();
 
             let mut url_found = false;
@@ -580,24 +564,18 @@ fn spawn_reader_thread(
                         if !url_found {
                             if let Some(url) = detect_url(&chunk) {
                                 url_found = true;
-                                let _ = app.emit(
-                                    "process:url-detected",
-                                    UrlPayload {
-                                        id: id.clone(),
-                                        url,
-                                    },
-                                );
+                                ctx.emit(Event::UrlDetected {
+                                    id: id.clone(),
+                                    url,
+                                });
                             }
                         }
 
-                        if let Some(count) = count_error_lines(&app, &id, &chunk) {
-                            let _ = app.emit(
-                                "process:error-count",
-                                ErrorCountPayload {
-                                    id: id.clone(),
-                                    count,
-                                },
-                            );
+                        if let Some(count) = count_error_lines(&ctx, &id, &chunk) {
+                            ctx.emit(Event::ErrorCount {
+                                id: id.clone(),
+                                count,
+                            });
                         }
 
                         if tx.send(chunk).is_err() {
@@ -645,21 +623,21 @@ fn count_error_matches(text: &str) -> u32 {
 /// Counts lines in `chunk` that look like an error/warning, adds them to the
 /// project's running total, and returns the new total — or `None` when the
 /// chunk contributed nothing, so callers can skip emitting a no-op event.
-fn count_error_lines(app: &AppHandle, id: &str, chunk: &[u8]) -> Option<u32> {
+fn count_error_lines(ctx: &Context, id: &str, chunk: &[u8]) -> Option<u32> {
     let text = String::from_utf8_lossy(chunk);
     let matches = count_error_matches(&text);
     if matches == 0 {
         return None;
     }
 
-    let manager = app.state::<ProcessManager>();
+    let manager = &ctx.manager;
     let mut counts = manager.error_counts.lock().unwrap();
     let total = counts.entry(id.to_string()).or_insert(0);
     *total += matches;
     Some(*total)
 }
 
-fn batch_and_emit(app: AppHandle, id: String, rx: std::sync::mpsc::Receiver<Vec<u8>>) {
+fn batch_and_emit(ctx: Context, id: String, rx: std::sync::mpsc::Receiver<Vec<u8>>) {
     let mut pending: Vec<u8> = Vec::new();
     loop {
         match rx.recv_timeout(FLUSH_INTERVAL) {
@@ -670,36 +648,33 @@ fn batch_and_emit(app: AppHandle, id: String, rx: std::sync::mpsc::Receiver<Vec<
                 while let Ok(more) = rx.try_recv() {
                     pending.extend_from_slice(&more);
                 }
-                flush_pending(&app, &id, &mut pending);
+                flush_pending(&ctx, &id, &mut pending);
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                flush_pending(&app, &id, &mut pending);
+                flush_pending(&ctx, &id, &mut pending);
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                flush_pending(&app, &id, &mut pending);
+                flush_pending(&ctx, &id, &mut pending);
                 break;
             }
         }
     }
 }
 
-fn flush_pending(app: &AppHandle, id: &str, pending: &mut Vec<u8>) {
+fn flush_pending(ctx: &Context, id: &str, pending: &mut Vec<u8>) {
     if pending.is_empty() {
         return;
     }
     let text = String::from_utf8_lossy(pending).into_owned();
     pending.clear();
-    let _ = app.emit(
-        "process:output",
-        OutputPayload {
-            id: id.to_string(),
-            chunk: text,
-        },
-    );
+    ctx.emit(Event::Output {
+        id: id.to_string(),
+        chunk: text,
+    });
 }
 
 fn spawn_waiter_thread(
-    app: AppHandle,
+    ctx: Context,
     id: String,
     name: String,
     mut child: Box<dyn Child + Send + Sync>,
@@ -715,7 +690,7 @@ fn spawn_waiter_thread(
             // Remove from the map before signaling `exited`, so that a
             // restart (stop() then start()) waiting on this same signal can
             // never observe a stale entry still occupying the id.
-            let manager = app.state::<ProcessManager>();
+            let manager = &ctx.manager;
             manager.processes.lock().unwrap().remove(&id);
 
             {
@@ -747,7 +722,13 @@ fn spawn_waiter_thread(
                     Some(serde_json::json!({ "projectId": id, "code": code })),
                     None,
                 );
-                crate::notifications::notify_crash(&app, &id, &name, code);
+                // The GUI turns this into a native notification; a headless
+                // daemon has no business posting UI of its own.
+                ctx.emit(Event::Crashed {
+                    id: id.clone(),
+                    name: name.clone(),
+                    code,
+                });
 
                 // A process that ran for a while before dying gets a clean
                 // slate: this crash starts a new backoff sequence at attempt
@@ -757,22 +738,19 @@ fn spawn_waiter_thread(
                     manager.restart_state.lock().unwrap().remove(&id);
                 }
 
-                let store = app.state::<crate::project_store::ProjectStore>();
+                let store = &ctx.store;
                 if let Some(project) = store.get(&id) {
                     if project.auto_restart {
-                        schedule_restart(&app, project);
+                        schedule_restart(&ctx, project);
                     }
                 }
             }
 
-            emit_status(&app, &id, final_status, None);
-            let _ = app.emit(
-                "process:exit",
-                ExitPayload {
-                    id: id.clone(),
-                    code,
-                },
-            );
+            emit_status(&ctx, &id, final_status, None);
+            ctx.emit(Event::Exit {
+                id: id.clone(),
+                code,
+            });
         })
         .expect("failed to spawn pty waiter thread");
 }

@@ -11,10 +11,11 @@ mod process_manager;
 mod project_store;
 mod resource_monitor;
 mod script_detector;
+mod tauri_sink;
 mod tray;
 
 use popover::Rect;
-use process_manager::{ProcessManager, ProjectStatus};
+use process_manager::{Context, ProcessManager, ProjectStatus};
 use project_store::ProjectStore;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -113,8 +114,8 @@ fn reposition_under_tray<R: Runtime>(window: &WebviewWindow<R>) {
 /// Reachable only from the popover UI — see `tray.rs` for why there's no
 /// native tray menu item for this.
 pub(crate) fn quit(app: &AppHandle) {
-    let manager = app.state::<ProcessManager>();
-    let store = app.state::<ProjectStore>();
+    let ctx = app.state::<Context>();
+    let (manager, store) = (&ctx.manager, &ctx.store);
     let running_ids: HashSet<String> = manager
         .snapshot_statuses()
         .into_iter()
@@ -144,11 +145,17 @@ pub fn run() {
     let builder = builder.plugin(tauri_nspanel::init());
 
     builder
-        .manage(ProjectStore::load())
-        .manage(ProcessManager::new())
         .manage(SuppressAutoHide(AtomicBool::new(false)))
         .manage(TrayRect(Mutex::new(None)))
         .setup(|app| {
+            // The Context bundles what a supervised process needs to reach;
+            // built here because its sink needs a live AppHandle.
+            app.manage(Context {
+                manager: std::sync::Arc::new(ProcessManager::new()),
+                store: std::sync::Arc::new(ProjectStore::load()),
+                sink: std::sync::Arc::new(tauri_sink::TauriSink::new(app.handle().clone())),
+            });
+
             error_logger::init(app.package_info().version.to_string(), std::env::consts::OS);
             env_resolver::init();
             notifications::init(app.handle());
@@ -253,11 +260,11 @@ pub fn run() {
             // starting up can't delay the app from appearing.
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
-                let store = app_handle.state::<ProjectStore>();
-                match store.take_was_running() {
+                let ctx = app_handle.state::<Context>().inner().clone();
+                match ctx.store.take_was_running() {
                     Ok(projects) => {
                         for project in projects {
-                            let _ = process_manager::start(&app_handle, project);
+                            let _ = process_manager::start(&ctx, project);
                         }
                     }
                     Err(e) => e.emit(),

@@ -1,3 +1,7 @@
+// The server and client that consume these types land in the next
+// commit; until then the whole module is legitimately unreferenced.
+#![allow(dead_code)]
+
 //! Wire format shared by the daemon and the GUI client.
 //!
 //! One JSON object per line over a Unix socket. Line-delimited JSON keeps
