@@ -6,7 +6,6 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "positioner:default",
     "dialog:default",
     "notification:default",
     "autostart:default"

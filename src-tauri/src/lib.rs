@@ -4,6 +4,7 @@ mod error_logger;
 #[cfg(target_os = "macos")]
 mod macos_window;
 mod notifications;
+mod popover;
 mod port_checker;
 mod process_manager;
 mod project_store;
@@ -11,16 +12,23 @@ mod resource_monitor;
 mod script_detector;
 mod tray;
 
+use popover::Rect;
 use process_manager::{ProcessManager, ProjectStatus};
 use project_store::ProjectStore;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, Runtime, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_positioner::{Position, WindowExt};
+
+/// The tray icon's on-screen rect, refreshed on every tray event.
+///
+/// Only the x and width are ever read — see `popover.rs` for why the y that
+/// comes with it can't be trusted on a multi-monitor setup.
+pub(crate) struct TrayRect(pub Mutex<Option<Rect>>);
 
 /// Set while a native dialog (e.g. the folder picker) is on screen.
 ///
@@ -46,7 +54,7 @@ fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
             if panel.is_visible() {
                 panel.order_out(None);
             } else {
-                let _ = window.move_window_constrained(Position::TrayCenter);
+                reposition_under_tray(window);
                 panel.show();
                 macos_window::log_window_diagnostics(window);
             }
@@ -59,12 +67,43 @@ fn toggle_popover<R: Runtime>(window: &WebviewWindow<R>) {
     if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
     } else {
-        let _ = window.move_window_constrained(Position::TrayCenter);
+        reposition_under_tray(window);
         let _ = window.show();
         let _ = window.set_focus();
 
         #[cfg(target_os = "macos")]
         macos_window::log_window_diagnostics(window);
+    }
+}
+
+/// Moves the popover under the tray icon, if a tray rect has been seen.
+///
+/// Showing the window at a stale position is still better than not showing
+/// it, so a failure here only logs — but it *does* log, which the previous
+/// `let _ = move_window_constrained(...)` did not, and that silence is what
+/// made the multi-monitor breakage look like "the app just won't open".
+fn reposition_under_tray<R: Runtime>(window: &WebviewWindow<R>) {
+    let tray = window
+        .app_handle()
+        .state::<TrayRect>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|rect| *rect);
+
+    match tray {
+        Some(tray) => {
+            popover::position_under_tray(window, tray);
+        }
+        None => error_logger::log_error(
+            error_logger::Level::Warn,
+            error_logger::Source::Backend,
+            "lib",
+            "POPOVER_NO_TRAY_RECT",
+            "No tray rect recorded yet; showing the popover at its last position",
+            None,
+            None,
+        ),
     }
 }
 
@@ -90,7 +129,6 @@ pub(crate) fn quit(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -108,6 +146,7 @@ pub fn run() {
         .manage(ProjectStore::load())
         .manage(ProcessManager::new())
         .manage(SuppressAutoHide(AtomicBool::new(false)))
+        .manage(TrayRect(Mutex::new(None)))
         .setup(|app| {
             error_logger::init(app.package_info().version.to_string(), std::env::consts::OS);
             env_resolver::init();
@@ -122,7 +161,31 @@ pub fn run() {
             TrayIconBuilder::with_id(tray::TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
                 .on_tray_icon_event(|tray, event| {
-                    tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
+                    // Every tray event carries the icon's current rect; keep
+                    // the latest so the popover can be centered under it even
+                    // when the icon shifts (other menu bar items coming and
+                    // going move it around).
+                    if let TrayIconEvent::Click { rect, .. }
+                    | TrayIconEvent::Enter { rect, .. }
+                    | TrayIconEvent::Move { rect, .. }
+                    | TrayIconEvent::Leave { rect, .. } = &event
+                    {
+                        // tray-icon already reports physical units, so the
+                        // scale factor here is a no-op conversion.
+                        let position = rect.position.to_physical::<f64>(1.0);
+                        let size = rect.size.to_physical::<f64>(1.0);
+                        let seen = Rect {
+                            x: position.x,
+                            y: position.y,
+                            width: size.width,
+                            height: size.height,
+                        };
+                        if let Ok(mut stored) =
+                            tray.app_handle().state::<TrayRect>().0.lock()
+                        {
+                            *stored = Some(seen);
+                        }
+                    }
 
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
