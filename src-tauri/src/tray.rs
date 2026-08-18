@@ -16,8 +16,9 @@
 //! per-project status is surfaced via the tray tooltip, which has no such
 //! click side effect.
 
-use crate::process_manager::{ProcessManager, ProjectStatus};
+use crate::process_manager::ProjectStatus;
 use crate::project_store::ProjectStore;
+use crate::StatusMirror;
 use std::collections::HashMap;
 use tauri::{image::Image, AppHandle, Manager};
 
@@ -144,8 +145,10 @@ fn status_glyph(status: ProjectStatus) -> &'static str {
 /// Recomputes the tray icon's badge and tooltip (per-project breakdown).
 /// Called after every status change and every project change.
 pub fn refresh(app: &AppHandle) {
-    let manager = app.state::<ProcessManager>();
-    let statuses = manager.snapshot_statuses();
+    // Read from the GUI's mirror rather than a ProcessManager: the daemon
+    // owns the processes now, and the tray must not make a blocking socket
+    // round trip from inside an event callback.
+    let statuses = app.state::<StatusMirror>().snapshot();
 
     let running = statuses
         .values()

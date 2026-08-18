@@ -169,6 +169,30 @@ impl DaemonClient {
     }
 }
 
+/// The connection as the Tauri commands see it — always present as managed
+/// state, even when there's no daemon behind it.
+///
+/// `State<DaemonClient>` would panic at runtime for every process command if
+/// the connection had failed, since Tauri's `state()` panics on an
+/// unmanaged type. Wrapping the `Option` moves that failure into an ordinary
+/// error the UI can show, and keeps the call sites identical.
+pub struct Daemon(pub Option<DaemonClient>);
+
+impl Daemon {
+    pub fn call(&self, request: Request) -> Result<ResponseBody, AppError> {
+        self.0
+            .as_ref()
+            .ok_or_else(|| {
+                AppError::new(
+                    MODULE,
+                    "DAEMON_UNAVAILABLE",
+                    "not connected to the easy-term daemon",
+                )
+            })?
+            .call(request)
+    }
+}
+
 fn connect_or_spawn_stream() -> Result<UnixStream, AppError> {
     if let Some(stream) = connect_if_alive() {
         return Ok(stream);
@@ -237,4 +261,22 @@ fn spawn_daemon() -> Result<(), AppError> {
             format!("could not start the daemon: {e}"),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: process commands take `State<Daemon>`, and Tauri's
+    /// `state()` panics on an unmanaged type — so a failed connection used
+    /// to mean every one of them aborted the app rather than reporting an
+    /// error. `Daemon` is always managed; the absence lives inside it.
+    #[test]
+    fn a_disconnected_daemon_reports_an_error_instead_of_panicking() {
+        let daemon = Daemon(None);
+        let err = daemon
+            .call(Request::ListStatuses)
+            .expect_err("a call with no daemon behind it must fail, not panic");
+        assert_eq!(err.code, "DAEMON_UNAVAILABLE");
+    }
 }

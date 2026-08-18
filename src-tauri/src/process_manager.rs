@@ -123,10 +123,6 @@ impl ProcessManager {
         Self::default()
     }
 
-    pub fn snapshot_statuses(&self) -> HashMap<String, ProjectStatus> {
-        self.statuses.lock().unwrap().clone()
-    }
-
     pub fn error_count(&self, id: &str) -> u32 {
         self.error_counts
             .lock()

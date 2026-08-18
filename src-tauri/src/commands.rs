@@ -1,7 +1,7 @@
 //! Tauri command handlers. Thin wrappers over `project_store` and
 //! `process_manager` — no business logic lives here.
 
-use crate::daemon::client::DaemonClient;
+use crate::daemon::client::Daemon;
 use crate::daemon::protocol::{Request, ResponseBody};
 use crate::env_resolver;
 use crate::error_logger::AppError;
@@ -44,7 +44,7 @@ pub fn save_project(
 pub fn delete_project(
     app: AppHandle,
     store: State<ProjectStore>,
-    daemon: State<DaemonClient>,
+    daemon: State<Daemon>,
     id: String,
 ) -> Result<(), AppError> {
     // Best-effort stop first — deleting a running project shouldn't leave an
@@ -59,7 +59,7 @@ pub fn delete_project(
 #[tauri::command]
 pub fn start_project(
     store: State<ProjectStore>,
-    daemon: State<DaemonClient>,
+    daemon: State<Daemon>,
     id: String,
 ) -> Result<(), AppError> {
     let project = find_project(&store, &id)?;
@@ -71,14 +71,14 @@ pub fn start_project(
 }
 
 #[tauri::command]
-pub fn stop_project(daemon: State<DaemonClient>, id: String) -> Result<(), AppError> {
+pub fn stop_project(daemon: State<Daemon>, id: String) -> Result<(), AppError> {
     daemon.call(Request::Stop { id }).map(|_| ())
 }
 
 #[tauri::command]
 pub fn restart_project(
     store: State<ProjectStore>,
-    daemon: State<DaemonClient>,
+    daemon: State<Daemon>,
     id: String,
 ) -> Result<(), AppError> {
     let project = find_project(&store, &id)?;
@@ -90,7 +90,7 @@ pub fn restart_project(
 }
 
 #[tauri::command]
-pub fn get_process_output(daemon: State<DaemonClient>, id: String) -> String {
+pub fn get_process_output(daemon: State<Daemon>, id: String) -> String {
     match daemon.call(Request::GetOutput { id }) {
         Ok(ResponseBody::Output { text }) => text,
         _ => String::new(),
@@ -98,7 +98,7 @@ pub fn get_process_output(daemon: State<DaemonClient>, id: String) -> String {
 }
 
 #[tauri::command]
-pub fn list_process_statuses(daemon: State<DaemonClient>) -> Vec<StatusPayload> {
+pub fn list_process_statuses(daemon: State<Daemon>) -> Vec<StatusPayload> {
     match daemon.call(Request::ListStatuses) {
         Ok(ResponseBody::Statuses { statuses }) => statuses,
         _ => Vec::new(),
@@ -106,7 +106,7 @@ pub fn list_process_statuses(daemon: State<DaemonClient>) -> Vec<StatusPayload> 
 }
 
 #[tauri::command]
-pub fn get_error_count(daemon: State<DaemonClient>, id: String) -> u32 {
+pub fn get_error_count(daemon: State<Daemon>, id: String) -> u32 {
     match daemon.call(Request::ErrorCount { id }) {
         Ok(ResponseBody::Count { count }) => count,
         _ => 0,
@@ -114,7 +114,7 @@ pub fn get_error_count(daemon: State<DaemonClient>, id: String) -> u32 {
 }
 
 #[tauri::command]
-pub fn reset_error_count(daemon: State<DaemonClient>, id: String) {
+pub fn reset_error_count(daemon: State<Daemon>, id: String) {
     let _ = daemon.call(Request::ResetErrorCount { id });
 }
 
@@ -141,7 +141,7 @@ pub fn toggle_group_pin(store: State<ProjectStore>, id: String) -> Result<Group,
 #[tauri::command]
 pub fn start_group(
     store: State<ProjectStore>,
-    daemon: State<DaemonClient>,
+    daemon: State<Daemon>,
     group_id: String,
 ) -> Result<(), AppError> {
     let group = store.get_group(&group_id).ok_or_else(|| {
@@ -164,7 +164,7 @@ pub fn start_group(
 #[tauri::command]
 pub fn stop_group(
     store: State<ProjectStore>,
-    daemon: State<DaemonClient>,
+    daemon: State<Daemon>,
     group_id: String,
 ) -> Result<(), AppError> {
     let group = store.get_group(&group_id).ok_or_else(|| {
@@ -183,7 +183,7 @@ pub fn stop_group(
 }
 
 #[tauri::command]
-pub fn get_project_stats(daemon: State<DaemonClient>, id: String) -> Option<ProcessStats> {
+pub fn get_project_stats(daemon: State<Daemon>, id: String) -> Option<ProcessStats> {
     match daemon.call(Request::GetStats { id }) {
         Ok(ResponseBody::Stats { stats }) => stats,
         _ => None,

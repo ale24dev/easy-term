@@ -11,7 +11,7 @@
 
 use crate::daemon::protocol::Event;
 use crate::process_manager::EventSink;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub struct TauriSink {
     app: AppHandle,
@@ -32,7 +32,13 @@ impl EventSink for TauriSink {
         }
 
         match &event {
-            Event::Status { .. } => crate::tray::refresh(&self.app),
+            Event::Status { id, status, .. } => {
+                // Mirror first, refresh second: the tray reads the mirror.
+                self.app
+                    .state::<crate::StatusMirror>()
+                    .set(id.clone(), *status);
+                crate::tray::refresh(&self.app);
+            }
             Event::Crashed { id, name, code } => {
                 crate::notifications::notify_crash(&self.app, id, name, *code)
             }

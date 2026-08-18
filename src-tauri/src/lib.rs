@@ -16,6 +16,7 @@ mod tray;
 
 use popover::Rect;
 use project_store::ProjectStore;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{
@@ -23,6 +24,32 @@ use tauri::{
     AppHandle, Manager, Runtime, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
+
+/// The GUI's read-only copy of what the daemon reports about each project.
+///
+/// The tray needs an aggregate status on every change, and the daemon is the
+/// only one who knows it — but asking over the socket from inside an event
+/// callback would block the reader thread on its own reply. So the sink
+/// mirrors each Status event here as it passes, and the tray reads locally.
+pub(crate) struct StatusMirror(Mutex<HashMap<String, process_manager::ProjectStatus>>);
+
+impl StatusMirror {
+    pub fn snapshot(&self) -> HashMap<String, process_manager::ProjectStatus> {
+        self.0.lock().map(|m| m.clone()).unwrap_or_default()
+    }
+
+    pub fn set(&self, id: String, status: process_manager::ProjectStatus) {
+        if let Ok(mut m) = self.0.lock() {
+            m.insert(id, status);
+        }
+    }
+
+    pub fn replace_all(&self, statuses: HashMap<String, process_manager::ProjectStatus>) {
+        if let Ok(mut m) = self.0.lock() {
+            *m = statuses;
+        }
+    }
+}
 
 /// The tray icon's on-screen rect, refreshed on every tray event.
 ///
@@ -147,6 +174,7 @@ pub fn run() {
         .manage(TrayRect(Mutex::new(None)))
         .setup(|app| {
             app.manage(ProjectStore::load());
+            app.manage(StatusMirror(Mutex::new(HashMap::new())));
 
             error_logger::init(app.package_info().version.to_string(), std::env::consts::OS);
             env_resolver::init();
@@ -252,19 +280,37 @@ pub fn run() {
             // replayed through the same sink the in-process path used, so the
             // frontend sees identical `process:*` events either way.
             let sink = tauri_sink::TauriSink::new(app.handle().clone());
-            match daemon::client::DaemonClient::connect_or_spawn(move |event| {
+            let connected = daemon::client::DaemonClient::connect_or_spawn(move |event| {
                 use crate::process_manager::EventSink;
                 sink.emit(event);
-            }) {
+            });
+
+            let client = match connected {
                 Ok(client) => {
-                    app.manage(client);
+                    // Seed from the daemon before the first paint: projects
+                    // it kept running while the app was closed have already
+                    // emitted their Status events, long before we connected.
+                    if let Ok(daemon::protocol::ResponseBody::Statuses { statuses }) =
+                        client.call(daemon::protocol::Request::ListStatuses)
+                    {
+                        app.state::<StatusMirror>().replace_all(
+                            statuses.into_iter().map(|s| (s.id, s.status)).collect(),
+                        );
+                    }
+                    Some(client)
                 }
                 Err(e) => {
-                    // Without a daemon the app can still browse and edit
-                    // projects; every process command will report the failure.
+                    // Without a daemon the app still opens and can browse and
+                    // edit projects; every process command reports the failure
+                    // instead of the window coming up dead.
                     e.emit();
+                    None
                 }
-            }
+            };
+            // Managed unconditionally: an unmanaged type makes Tauri's
+            // `state()` panic, which would turn "no daemon" into a crash.
+            app.manage(daemon::client::Daemon(client));
+            tray::refresh(app.handle());
 
             Ok(())
         })
