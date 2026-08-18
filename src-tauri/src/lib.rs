@@ -15,9 +15,7 @@ mod tauri_sink;
 mod tray;
 
 use popover::Rect;
-use process_manager::{Context, ProcessManager, ProjectStatus};
 use project_store::ProjectStore;
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{
@@ -114,17 +112,10 @@ fn reposition_under_tray<R: Runtime>(window: &WebviewWindow<R>) {
 /// Reachable only from the popover UI — see `tray.rs` for why there's no
 /// native tray menu item for this.
 pub(crate) fn quit(app: &AppHandle) {
-    let ctx = app.state::<Context>();
-    let (manager, store) = (&ctx.manager, &ctx.store);
-    let running_ids: HashSet<String> = manager
-        .snapshot_statuses()
-        .into_iter()
-        .filter(|(_, status)| matches!(status, ProjectStatus::Running | ProjectStatus::Starting))
-        .map(|(id, _)| id)
-        .collect();
-    if let Err(e) = store.set_was_running(&running_ids) {
-        e.emit();
-    }
+    // Nothing to tear down or remember: the daemon keeps the processes
+    // running, and the next launch simply reconnects and finds them. The old
+    // `wasRunning` snapshot-and-restore existed only because quitting used
+    // to kill everything.
     app.exit(0);
 }
 
@@ -155,13 +146,7 @@ pub fn run() {
         .manage(SuppressAutoHide(AtomicBool::new(false)))
         .manage(TrayRect(Mutex::new(None)))
         .setup(|app| {
-            // The Context bundles what a supervised process needs to reach;
-            // built here because its sink needs a live AppHandle.
-            app.manage(Context {
-                manager: std::sync::Arc::new(ProcessManager::new()),
-                store: std::sync::Arc::new(ProjectStore::load()),
-                sink: std::sync::Arc::new(tauri_sink::TauriSink::new(app.handle().clone())),
-            });
+            app.manage(ProjectStore::load());
 
             error_logger::init(app.package_info().version.to_string(), std::env::consts::OS);
             env_resolver::init();
@@ -262,21 +247,24 @@ pub fn run() {
                 });
             }
 
-            // Restore whatever was flagged `wasRunning` at the last clean
-            // Quit. Runs on its own thread so a handful of dev servers
-            // starting up can't delay the app from appearing.
-            let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let ctx = app_handle.state::<Context>().inner().clone();
-                match ctx.store.take_was_running() {
-                    Ok(projects) => {
-                        for project in projects {
-                            let _ = process_manager::start(&ctx, project);
-                        }
-                    }
-                    Err(e) => e.emit(),
+            // Connect to the daemon that owns the processes, starting one if
+            // this is the first launch since a reboot. Its event stream is
+            // replayed through the same sink the in-process path used, so the
+            // frontend sees identical `process:*` events either way.
+            let sink = tauri_sink::TauriSink::new(app.handle().clone());
+            match daemon::client::DaemonClient::connect_or_spawn(move |event| {
+                use crate::process_manager::EventSink;
+                sink.emit(event);
+            }) {
+                Ok(client) => {
+                    app.manage(client);
                 }
-            });
+                Err(e) => {
+                    // Without a daemon the app can still browse and edit
+                    // projects; every process command will report the failure.
+                    e.emit();
+                }
+            }
 
             Ok(())
         })

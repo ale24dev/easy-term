@@ -1,11 +1,13 @@
 //! Tauri command handlers. Thin wrappers over `project_store` and
 //! `process_manager` — no business logic lives here.
 
+use crate::daemon::client::DaemonClient;
+use crate::daemon::protocol::{Request, ResponseBody};
 use crate::env_resolver;
 use crate::error_logger::AppError;
-use crate::process_manager::{self, Context};
+use crate::process_manager::StatusPayload;
 use crate::project_store::{Group, Project, ProjectStore};
-use crate::resource_monitor::{self, ProcessStats};
+use crate::resource_monitor::ProcessStats;
 use crate::tray;
 use std::collections::HashMap;
 use std::process::Command;
@@ -22,96 +24,126 @@ fn find_project(store: &ProjectStore, id: &str) -> Result<Project, AppError> {
 }
 
 #[tauri::command]
-pub fn list_projects(ctx: State<Context>) -> Vec<Project> {
-    ctx.store.list()
+pub fn list_projects(store: State<ProjectStore>) -> Vec<Project> {
+    store.list()
 }
 
 #[tauri::command]
 pub fn save_project(
     app: AppHandle,
-    ctx: State<Context>,
+    store: State<ProjectStore>,
     project: Project,
 ) -> Result<Project, AppError> {
-    let saved = ctx.store.save(project)?;
-    ctx.store.sync_all_group_membership()?;
+    let saved = store.save(project)?;
+    store.sync_all_group_membership()?;
     tray::refresh(&app);
     Ok(saved)
 }
 
 #[tauri::command]
-pub fn delete_project(app: AppHandle, ctx: State<Context>, id: String) -> Result<(), AppError> {
+pub fn delete_project(
+    app: AppHandle,
+    store: State<ProjectStore>,
+    daemon: State<DaemonClient>,
+    id: String,
+) -> Result<(), AppError> {
     // Best-effort stop first — deleting a running project shouldn't leave an
     // orphaned process nobody can reach from the UI anymore.
-    let _ = process_manager::stop(&ctx, &id);
-    ctx.store.delete(&id)?;
-    ctx.manager.forget(&id);
+    let _ = daemon.call(Request::Stop { id: id.clone() });
+    store.delete(&id)?;
+    let _ = daemon.call(Request::Forget { id: id.clone() });
     tray::refresh(&app);
     Ok(())
 }
 
 #[tauri::command]
-pub fn start_project(ctx: State<Context>, id: String) -> Result<(), AppError> {
-    let project = find_project(&ctx.store, &id)?;
-    process_manager::start(&ctx, project)
+pub fn start_project(
+    store: State<ProjectStore>,
+    daemon: State<DaemonClient>,
+    id: String,
+) -> Result<(), AppError> {
+    let project = find_project(&store, &id)?;
+    daemon
+        .call(Request::Start {
+            project: Box::new(project),
+        })
+        .map(|_| ())
 }
 
 #[tauri::command]
-pub fn stop_project(ctx: State<Context>, id: String) -> Result<(), AppError> {
-    process_manager::stop(&ctx, &id)
+pub fn stop_project(daemon: State<DaemonClient>, id: String) -> Result<(), AppError> {
+    daemon.call(Request::Stop { id }).map(|_| ())
 }
 
 #[tauri::command]
-pub fn restart_project(ctx: State<Context>, id: String) -> Result<(), AppError> {
-    let project = find_project(&ctx.store, &id)?;
-    process_manager::restart(&ctx, project)
+pub fn restart_project(
+    store: State<ProjectStore>,
+    daemon: State<DaemonClient>,
+    id: String,
+) -> Result<(), AppError> {
+    let project = find_project(&store, &id)?;
+    daemon
+        .call(Request::Restart {
+            project: Box::new(project),
+        })
+        .map(|_| ())
 }
 
 #[tauri::command]
-pub fn get_process_output(ctx: State<Context>, id: String) -> String {
-    process_manager::get_output(&ctx, &id)
+pub fn get_process_output(daemon: State<DaemonClient>, id: String) -> String {
+    match daemon.call(Request::GetOutput { id }) {
+        Ok(ResponseBody::Output { text }) => text,
+        _ => String::new(),
+    }
 }
 
 #[tauri::command]
-pub fn list_process_statuses(ctx: State<Context>) -> Vec<process_manager::StatusPayload> {
-    ctx.manager.snapshot_all()
+pub fn list_process_statuses(daemon: State<DaemonClient>) -> Vec<StatusPayload> {
+    match daemon.call(Request::ListStatuses) {
+        Ok(ResponseBody::Statuses { statuses }) => statuses,
+        _ => Vec::new(),
+    }
 }
 
 #[tauri::command]
-pub fn get_error_count(ctx: State<Context>, id: String) -> u32 {
-    ctx.manager.error_count(&id)
+pub fn get_error_count(daemon: State<DaemonClient>, id: String) -> u32 {
+    match daemon.call(Request::ErrorCount { id }) {
+        Ok(ResponseBody::Count { count }) => count,
+        _ => 0,
+    }
 }
 
 #[tauri::command]
-pub fn reset_error_count(ctx: State<Context>, id: String) {
-    ctx.manager.reset_error_count(&id);
+pub fn reset_error_count(daemon: State<DaemonClient>, id: String) {
+    let _ = daemon.call(Request::ResetErrorCount { id });
 }
 
 #[tauri::command]
-pub fn list_groups(ctx: State<Context>) -> Vec<Group> {
-    ctx.store.list_groups()
+pub fn list_groups(store: State<ProjectStore>) -> Vec<Group> {
+    store.list_groups()
 }
 
 #[tauri::command]
-pub fn find_or_create_group(ctx: State<Context>, name: String) -> Result<Group, AppError> {
-    let store = &ctx.store;
+pub fn find_or_create_group(store: State<ProjectStore>, name: String) -> Result<Group, AppError> {
     store.find_or_create_group(&name)
 }
 
 #[tauri::command]
-pub fn toggle_project_pin(ctx: State<Context>, id: String) -> Result<Project, AppError> {
-    let store = &ctx.store;
+pub fn toggle_project_pin(store: State<ProjectStore>, id: String) -> Result<Project, AppError> {
     store.toggle_project_pin(&id)
 }
 
 #[tauri::command]
-pub fn toggle_group_pin(ctx: State<Context>, id: String) -> Result<Group, AppError> {
-    let store = &ctx.store;
+pub fn toggle_group_pin(store: State<ProjectStore>, id: String) -> Result<Group, AppError> {
     store.toggle_group_pin(&id)
 }
 
 #[tauri::command]
-pub fn start_group(ctx: State<Context>, group_id: String) -> Result<(), AppError> {
-    let store = &ctx.store;
+pub fn start_group(
+    store: State<ProjectStore>,
+    daemon: State<DaemonClient>,
+    group_id: String,
+) -> Result<(), AppError> {
     let group = store.get_group(&group_id).ok_or_else(|| {
         AppError::new(
             "commands",
@@ -126,13 +158,15 @@ pub fn start_group(ctx: State<Context>, group_id: String) -> Result<(), AppError
         .filter_map(|id| store.get(id))
         .collect();
 
-    process_manager::start_group(&ctx, projects);
-    Ok(())
+    daemon.call(Request::StartGroup { projects }).map(|_| ())
 }
 
 #[tauri::command]
-pub fn stop_group(ctx: State<Context>, group_id: String) -> Result<(), AppError> {
-    let store = &ctx.store;
+pub fn stop_group(
+    store: State<ProjectStore>,
+    daemon: State<DaemonClient>,
+    group_id: String,
+) -> Result<(), AppError> {
     let group = store.get_group(&group_id).ok_or_else(|| {
         AppError::new(
             "commands",
@@ -141,15 +175,19 @@ pub fn stop_group(ctx: State<Context>, group_id: String) -> Result<(), AppError>
         )
     })?;
 
-    process_manager::stop_group(&ctx, group.project_ids);
-    Ok(())
+    daemon
+        .call(Request::StopGroup {
+            project_ids: group.project_ids,
+        })
+        .map(|_| ())
 }
 
 #[tauri::command]
-pub fn get_project_stats(ctx: State<Context>, id: String) -> Option<ProcessStats> {
-    let manager = &ctx.manager;
-    let pid = manager.pid_of(&id)?;
-    resource_monitor::stats_for_group(pid).ok()
+pub fn get_project_stats(daemon: State<DaemonClient>, id: String) -> Option<ProcessStats> {
+    match daemon.call(Request::GetStats { id }) {
+        Ok(ResponseBody::Stats { stats }) => stats,
+        _ => None,
+    }
 }
 
 #[tauri::command]

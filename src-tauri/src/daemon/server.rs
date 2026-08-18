@@ -7,7 +7,6 @@
 use super::protocol::{Envelope, Event, Message, Request, ResponseBody, WireError};
 use crate::error_logger::{log_error, Level, Source};
 use crate::process_manager::{self, Context, EventSink, ProcessManager};
-use crate::project_store::ProjectStore;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -80,9 +79,12 @@ pub fn run() -> Result<(), String> {
         UnixListener::bind(&path).map_err(|e| format!("could not bind {path:?}: {e}"))?;
 
     let broadcaster = Arc::new(Broadcaster::default());
+    // No ProjectStore here on purpose: the daemon supervises exactly what
+    // the GUI hands it (Start carries the whole Project), so there's no
+    // second copy of the config that could disagree with the one the user
+    // is editing.
     let ctx = Context {
         manager: Arc::new(ProcessManager::new()),
-        store: Arc::new(ProjectStore::load()),
         sink: broadcaster.clone(),
     };
 

@@ -8,7 +8,7 @@
 use crate::daemon::protocol::Event;
 use crate::env_resolver;
 use crate::error_logger::{log_error, AppError, Level, Source};
-use crate::project_store::{Project, ProjectStore};
+use crate::project_store::Project;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,6 @@ pub trait EventSink: Send + Sync + 'static {
 #[derive(Clone)]
 pub struct Context {
     pub manager: Arc<ProcessManager>,
-    pub store: Arc<ProjectStore>,
     pub sink: Arc<dyn EventSink>,
 }
 
@@ -309,8 +308,7 @@ pub fn start(ctx: &Context, project: Project) -> Result<(), AppError> {
     spawn_reader_thread(ctx.clone(), project.id.clone(), reader, buffer);
     spawn_waiter_thread(
         ctx.clone(),
-        project.id.clone(),
-        project.name.clone(),
+        project.clone(),
         child,
         exited,
         stopping,
@@ -675,16 +673,19 @@ fn flush_pending(ctx: &Context, id: &str, pending: &mut Vec<u8>) {
 
 fn spawn_waiter_thread(
     ctx: Context,
-    id: String,
-    name: String,
+    project: Project,
     mut child: Box<dyn Child + Send + Sync>,
     exited: ExitSignal,
     stopping: Arc<AtomicBool>,
     started_at: Instant,
 ) {
     std::thread::Builder::new()
-        .name(format!("pty-wait-{id}"))
+        .name(format!("pty-wait-{}", project.id))
         .spawn(move || {
+            // Carried in rather than looked up from a store on exit: the
+            // daemon supervises whatever the GUI handed it, and consulting a
+            // second copy of the config would mean the two could disagree.
+            let (id, name) = (project.id.clone(), project.name.clone());
             let status = child.wait();
 
             // Remove from the map before signaling `exited`, so that a
@@ -738,11 +739,8 @@ fn spawn_waiter_thread(
                     manager.restart_state.lock().unwrap().remove(&id);
                 }
 
-                let store = &ctx.store;
-                if let Some(project) = store.get(&id) {
-                    if project.auto_restart {
-                        schedule_restart(&ctx, project);
-                    }
+                if project.auto_restart {
+                    schedule_restart(&ctx, project.clone());
                 }
             }
 

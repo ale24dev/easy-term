@@ -62,7 +62,8 @@ Instead of juggling a terminal window per project, you define each project once 
 - **Search, error highlighting, native crash notifications.** Cmd/Ctrl+F in any log, a live error/warning counter per project, and a system notification that jumps straight to the right log on click.
 - **Reachable over full-screen apps.** Built on a non-activating `NSPanel` (the same mechanism Spotlight uses), so the popover shows up even while another app owns a full-screen Space — a regular Tauri window can't do this.
 - **Quick actions.** Open a project in your editor, reveal it in Finder, copy its detected URL, open it in the browser.
-- **Launch at login**, with running projects restored automatically.
+- **Your dev servers survive the app.** Quit easy-term and they keep running; reopen it and you're reconnected to the same processes, with the logs from while you were away. See [why there's a daemon](#why-theres-a-daemon).
+- **Launch at login.**
 - **Light/dark/system theme**, and an internal diagnostics log (Settings → Diagnostics) for troubleshooting the app itself.
 
 ## Install
@@ -154,7 +155,17 @@ Builds, signs, notarizes, staples the ticket, and prints the `.dmg`'s sha256. Fr
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Projects are persisted as JSON at `~/Library/Application Support/easy-term/projects.json`. Runtime state (PIDs, live status, output buffers) lives only in memory — nothing about a running process survives an app restart except the "was it running" flag used to restore it. Killing a project kills its whole process group (`setsid` + `killpg`), so tools like Vite/Next that spawn child processes don't leave orphans behind. Internal app errors (not your projects' output) are logged separately to `~/Library/Logs/easy-term/` for troubleshooting — see Settings → Diagnostics.
+Projects are persisted as JSON at `~/Library/Application Support/easy-term/projects.json`. Killing a project kills its whole process group (`setsid` + `killpg`), so tools like Vite/Next that spawn child processes don't leave orphans behind. Internal app errors (not your projects' output) are logged separately to `~/Library/Logs/easy-term/` for troubleshooting — see Settings → Diagnostics.
+
+### Why there's a daemon
+
+Your dev servers keep running when you quit the app, and reopening it reconnects to them — same processes, same scrollback.
+
+That needs a second process, and not for the reason you'd guess. Project processes run inside a PTY, and closing the **master** end of a PTY makes the kernel hang up the terminal and SIGHUP everything in its foreground process group. So whoever holds that end can never quit without taking the processes down with it — ignoring SIGHUP doesn't help either, since writes to a hung-up terminal then fail with `EIO`. Keeping the processes alive isn't a matter of not killing them; it requires somebody to keep holding that file descriptor.
+
+That somebody is `easy-term --daemon`: the same binary, running headless, owning every PTY. The GUI is a client that connects to it over a Unix socket at `~/Library/Application Support/easy-term/daemon.sock`, sends commands, and streams events back — the model tmux uses, for the same reason. It's spawned automatically on first launch if it isn't already running. Because the daemon also holds the output ring buffers, reconnecting restores the logs from before you closed the app, not just the process list.
+
+A reboot still clears everything: the daemon isn't a launch agent, so nothing survives it. Quitting the app leaves both the daemon and your projects running.
 
 For the full design history — every decision, the bugs found along the way, and why — see [`PLAN.md`](PLAN.md).
 
