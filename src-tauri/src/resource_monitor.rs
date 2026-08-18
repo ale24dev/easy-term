@@ -6,12 +6,12 @@
 //! always available on macOS, and consistent with `port_checker`'s approach.
 
 use crate::error_logger::AppError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::process::Command;
 
 const MODULE: &str = "resource_monitor";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessStats {
     pub cpu_percent: f32,

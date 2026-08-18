@@ -10,7 +10,7 @@ use crate::error_logger::{log_error, AppError, Level, Source};
 use crate::project_store::Project;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,7 +40,7 @@ static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
 static ERROR_LINE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b(error|warn(?:ing)?)\b").unwrap());
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectStatus {
     Stopped,
@@ -143,11 +143,11 @@ impl ProcessManager {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StatusPayload {
-    id: String,
-    status: ProjectStatus,
-    pid: Option<u32>,
+    pub id: String,
+    pub status: ProjectStatus,
+    pub pid: Option<u32>,
 }
 
 #[derive(Serialize, Clone)]

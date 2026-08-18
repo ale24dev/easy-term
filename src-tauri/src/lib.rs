@@ -1,4 +1,5 @@
 mod commands;
+mod daemon;
 mod env_resolver;
 mod error_logger;
 #[cfg(target_os = "macos")]
