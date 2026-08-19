@@ -81,9 +81,9 @@ impl Client {
         panic!("the daemon never started listening on {socket:?}");
     }
 
-    /// Sends a request and returns the response, skipping over any events
-    /// that arrive in the meantime.
-    fn request(&mut self, request: Request) -> ResponseBody {
+    /// Writes a request without waiting for its response, returning the id
+    /// it was sent under.
+    fn send(&mut self, request: Request) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -91,17 +91,34 @@ impl Client {
         line.push('\n');
         self.stream.write_all(line.as_bytes()).unwrap();
         self.stream.flush().unwrap();
+        id
+    }
 
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline {
+    /// Reads until the next response, skipping over any events in between.
+    fn next_response(&mut self) -> (u64, ResponseBody) {
+        loop {
             let mut buf = String::new();
             if self.reader.read_line(&mut buf).unwrap_or(0) == 0 {
                 panic!("the daemon closed the connection while waiting for a response");
             }
             match serde_json::from_str::<Message>(buf.trim()) {
-                Ok(Message::Response { id: got, body }) if got == id => return body,
-                Ok(_) => continue, // an event, or a reply to something else
+                Ok(Message::Response { id, body }) => return (id, body),
+                Ok(_) => continue, // an event
                 Err(e) => panic!("could not parse {buf:?}: {e}"),
+            }
+        }
+    }
+
+    /// Sends a request and returns the response, skipping over any events
+    /// that arrive in the meantime.
+    fn request(&mut self, request: Request) -> ResponseBody {
+        let id = self.send(request);
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            match self.next_response() {
+                (got, body) if got == id => return body,
+                _ => continue, // a reply to something else
             }
         }
         panic!("timed out waiting for a response to request {id}");
@@ -283,6 +300,104 @@ fn two_clients_both_see_the_same_events() {
     let _ = second.request(Request::Stop {
         id: "shared".to_string(),
     });
+}
+
+/// Regression: the daemon used to `handle()` each request inline in the
+/// connection's read loop, so one slow request blocked every request behind
+/// it on that connection. `Stop` is slow by construction — it waits up to
+/// GRACEFUL_TIMEOUT (3s) for the process to die before escalating to
+/// SIGKILL, and `Restart` pays that twice. Meanwhile the UI polls resource
+/// stats every couple of seconds and re-syncs statuses whenever the popover
+/// takes focus, so a single restart was enough to queue those past the
+/// client's 10s request timeout: the app looked hung and reported
+/// DAEMON_TIMEOUT.
+#[test]
+fn a_slow_request_does_not_block_the_ones_behind_it() {
+    let dir = scratch_dir().join("head-of-line");
+    std::fs::create_dir_all(&dir).unwrap();
+    let socket = dir.join("daemon.sock");
+    let _daemon = start_daemon(&socket, &dir);
+
+    let mut app = Client::connect_within(&socket, Duration::from_secs(10));
+
+    // Ignores SIGTERM in the process-group leader, so `Stop` has to sit out
+    // the full graceful timeout and escalate to SIGKILL. The inner `sleep`
+    // children do die on TERM; the loop just starts another one. `READY` is
+    // printed *after* the trap is installed, so it doubles as the handshake
+    // for "the ignore is in effect now" — stopping before that lands leaves
+    // the shell with a default disposition and the stop finishes in
+    // microseconds, quietly making this whole test vacuous.
+    let mut project = probe_project("stubborn", "stubborn-marker");
+    project.command = "trap '' TERM; echo READY; while :; do sleep 1; done".to_string();
+
+    assert!(matches!(
+        app.request(Request::Start {
+            project: Box::new(project),
+        }),
+        ResponseBody::Ok
+    ));
+
+    let pid = wait_for(Duration::from_secs(10), || {
+        match app.request(Request::ListStatuses) {
+            ResponseBody::Statuses { statuses } => statuses
+                .iter()
+                .find(|s| s.id == "stubborn")
+                .and_then(|s| s.pid),
+            other => panic!("expected statuses, got {other:?}"),
+        }
+    })
+    .expect("the project never reported a pid");
+
+    wait_for(Duration::from_secs(10), || {
+        match app.request(Request::GetOutput {
+            id: "stubborn".to_string(),
+        }) {
+            ResponseBody::Output { text } if text.contains("READY") => Some(()),
+            _ => None,
+        }
+    })
+    .expect("the shell never reported that its SIGTERM trap was installed");
+
+    // Both go out before either answer comes back, so the daemon genuinely
+    // has to choose an order rather than being handed one.
+    let started = Instant::now();
+    let stop_id = app.send(Request::Stop {
+        id: "stubborn".to_string(),
+    });
+    let ping_id = app.send(Request::Ping);
+
+    let (first_id, _) = app.next_response();
+    let ping_took = started.elapsed();
+
+    assert_eq!(
+        first_id, ping_id,
+        "the Ping (id {ping_id}) should have been answered while the Stop \
+         (id {stop_id}) was still waiting out its graceful timeout, but the \
+         Stop answered first — requests are being serialized per connection \
+         again"
+    );
+    assert!(
+        ping_took < Duration::from_secs(2),
+        "the Ping took {ping_took:?}, which is long enough to have waited on \
+         the Stop's 3s graceful timeout"
+    );
+
+    // And the slow one still answers, on its own schedule.
+    let (second_id, _) = app.next_response();
+    assert_eq!(second_id, stop_id, "the Stop should answer too, just later");
+    assert!(
+        started.elapsed() >= Duration::from_secs(2),
+        "the Stop came back in {:?} — it never hit the graceful timeout, so \
+         this test proved nothing about slow requests",
+        started.elapsed()
+    );
+
+    assert!(
+        wait_for(Duration::from_secs(10), || (!process_is_alive(pid))
+            .then_some(()))
+        .is_some(),
+        "the process should be gone once the Stop escalates to SIGKILL"
+    );
 }
 
 fn process_is_alive(pid: u32) -> bool {

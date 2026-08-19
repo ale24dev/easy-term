@@ -1,5 +1,3 @@
-// The GUI wiring that calls this lands in the next commit.
-#![allow(dead_code)]
 
 //! The GUI's side of the socket: talks to the daemon, starting one if
 //! there isn't a live one already.

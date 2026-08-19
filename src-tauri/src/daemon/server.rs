@@ -171,16 +171,27 @@ fn serve_client(stream: UnixStream, ctx: Context, broadcaster: Arc<Broadcaster>)
             }
         };
 
-        let body = handle(&ctx, envelope.request);
-        if tx
-            .send(Message::Response {
-                id: envelope.id,
-                body,
+        // Handled off the read loop, deliberately. Some requests are slow
+        // by nature — `stop` waits up to GRACEFUL_TIMEOUT for the process to
+        // die before escalating to SIGKILL, and `restart` pays that twice —
+        // and running them inline serialized every other request behind
+        // them. With the UI polling resource stats every couple of seconds
+        // and re-syncing statuses on focus, one restart was enough to queue
+        // up work past the client's request timeout and make the app look
+        // hung. Responses carry their request's id, so answering out of
+        // order is already expected.
+        let ctx = ctx.clone();
+        let tx = tx.clone();
+        std::thread::Builder::new()
+            .name("daemon-request".into())
+            .spawn(move || {
+                let body = handle(&ctx, envelope.request);
+                let _ = tx.send(Message::Response {
+                    id: envelope.id,
+                    body,
+                });
             })
-            .is_err()
-        {
-            break; // writer thread is gone
-        }
+            .ok();
     }
 }
 
